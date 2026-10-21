@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --ink: #263a32;
+    --ink-dark: #21362d;
+    --muted: #78867d;
+    --muted-2: #a4aaa2;
+    --bg: #f7f7f4;
+    --paper: #ffffff;
+    --warm: #faf8f3;
+    --wash: #edf2eb;
+    --forest: #244d3b;
+    --forest-hover: #1e3f30;
+    --sage: #68816e;
+    --sage-light: #e6eee5;
+    --sage2: #c8d6c8;
+    --stroke: #e5e9e3;
+    --blush: #f4eeea;
+    --gold: #b99b65;
+    --gold-bg: #fdfbf7;
+    --warning: #d18a46;
+    --warn-bg: #fff3e4;
+    --danger: #b76258;
+    --danger-bg: #fdf0ed;
+    --blue: #628391;
+    --blue-bg: #ecf3f6;
+  }
+
+  body {
+    font-family: 'Manrope', 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: var(--bg);
+    color: var(--ink);
+  }
+
+  h1, h2, h3, .font-serif {
+    font-family: 'Playfair Display', Georgia, serif;
+  }
+}
+
+/* Custom scrollbar for modern studio feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5cb;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a8b8a8;
+}
+
+/* Print styling for professional quotes and client briefing sheets */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-shadow-none {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+  }
+}

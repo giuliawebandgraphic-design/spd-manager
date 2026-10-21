@@ -1,0 +1,6 @@
+{
+  "name": "Sage Paper Studio Manager",
+  "description": "Gestionale professionale full-stack per Sage Paper Design: matrimoni, stationery, stampa B2B, shop, pianificatore a ritroso, magazzino, preventivi e portale clienti protetto.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
