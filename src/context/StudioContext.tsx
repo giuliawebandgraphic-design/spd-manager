@@ -15,6 +15,8 @@ import {
 } from '../types';
 import { buildDefaultTasks, generateId, DEFAULT_PRICE_CATALOG, DEFAULT_FINANCIAL_RECORDS, generatePortalPassword } from '../lib/constants';
 import { computeBackwardPlans, TODAY_ISO, addDays, ComputedPlannerResult } from '../lib/plannerEngine';
+import { firestoreDb } from '../lib/firebase';
+import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 
 const LOCAL_STORAGE_KEY = 'sage_paper_studio_manager_v2';
 
@@ -129,80 +131,92 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isSyncing, setIsSyncing] = useState<boolean>(true);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
-  // Load from backend Cloud SQL API and set up background live synchronization
+  // Setup bidirectional real-time synchronization with Firestore Cloud DB
   useEffect(() => {
+    let unsubscribeFirestore: (() => void) | undefined;
     let isMounted = true;
 
-    async function loadData(silent = false) {
-      if (!silent) setIsSyncing(true);
+    try {
+      const mainDocRef = doc(firestoreDb, 'studio_data', 'main');
+
+      unsubscribeFirestore = onSnapshot(
+        mainDocRef,
+        (snapshot) => {
+          if (!isMounted) return;
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            if (data) {
+              if (Array.isArray(data.projects)) setProjects(data.projects);
+              if (Array.isArray(data.clients)) setClients(data.clients);
+              if (Array.isArray(data.quotes)) setQuotes(data.quotes);
+              if (Array.isArray(data.inventory)) setInventory(data.inventory);
+              if (Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
+                setPriceCatalog(data.priceCatalog);
+              }
+              if (Array.isArray(data.financials) && data.financials.length > 0) {
+                setFinancials(data.financials);
+              }
+              if (data.settings) setSettings(data.settings);
+              setDbStatus('connected');
+              setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
+              setIsSyncing(false);
+
+              persistLocalCache(
+                data.projects,
+                data.clients,
+                data.quotes,
+                data.inventory,
+                data.priceCatalog,
+                data.settings,
+                undefined,
+                data.financials
+              );
+            }
+          } else {
+            fallbackLoad();
+          }
+        },
+        (error) => {
+          console.warn('Firestore real-time sync info:', error);
+          if (isMounted) fallbackLoad();
+        }
+      );
+    } catch (e) {
+      console.warn('Firestore initialization info:', e);
+      fallbackLoad();
+    }
+
+    async function fallbackLoad() {
+      if (!isMounted) return;
+      setIsSyncing(true);
       try {
         const res = await fetch('/api/studio/data');
         if (res.ok) {
-          let data = await res.json();
+          const data = await res.json();
           if (data && Array.isArray(data.projects)) {
-            // Check if local storage has any projects or clients not yet in Cloud SQL
-            try {
-              const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-              if (stored) {
-                const parsed = JSON.parse(stored);
-                const dbProjectIds = new Set(data.projects.map((p: Project) => p.id));
-                const dbClientIds = new Set((data.clients || []).map((c: Client) => c.id));
-
-                const missingProjects = Array.isArray(parsed.projects)
-                  ? parsed.projects.filter((p: Project) => p && p.id && !dbProjectIds.has(p.id))
-                  : [];
-                const missingClients = Array.isArray(parsed.clients)
-                  ? parsed.clients.filter((c: Client) => c && c.id && !dbClientIds.has(c.id))
-                  : [];
-
-                if (missingProjects.length > 0 || missingClients.length > 0) {
-                  const pushRes = await fetch('/api/studio/sync-push', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      projects: missingProjects,
-                      clients: missingClients,
-                    }),
-                  });
-                  if (pushRes.ok) {
-                    const pushResult = await pushRes.json();
-                    if (pushResult.data && Array.isArray(pushResult.data.projects)) {
-                      data = pushResult.data;
-                    }
-                  }
-                }
-              }
-            } catch (syncErr) {
-              console.warn('Initial sync-push check error:', syncErr);
-            }
-
             if (!isMounted) return;
             setProjects(data.projects);
             setClients(data.clients || []);
             setQuotes(data.quotes || []);
             setInventory(data.inventory || []);
-            if (data.priceCatalog && Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
-              setPriceCatalog(data.priceCatalog);
-            } else {
-              setPriceCatalog(DEFAULT_PRICE_CATALOG);
-            }
-            if (data.financials && Array.isArray(data.financials) && data.financials.length > 0) {
-              setFinancials(data.financials);
-            } else {
-              setFinancials(DEFAULT_FINANCIAL_RECORDS);
-            }
+            if (data.priceCatalog?.length) setPriceCatalog(data.priceCatalog);
+            if (data.financials?.length) setFinancials(data.financials);
             if (data.settings) setSettings(data.settings);
             setDbStatus('connected');
             setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
             setIsSyncing(false);
+
+            try {
+              await setDoc(doc(firestoreDb, 'studio_data', 'main'), {
+                ...data,
+                updatedAt: new Date().toISOString(),
+              }, { merge: true });
+            } catch (err) {}
             return;
           }
         }
-      } catch (err) {
-        console.warn('API error, falling back to local persistent store:', err);
-      }
+      } catch (err) {}
 
-      // Local storage fallback if API unreachable
       try {
         const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
         if (stored) {
@@ -212,55 +226,61 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setClients(parsed.clients || []);
             setQuotes(parsed.quotes || []);
             setInventory(parsed.inventory || []);
-            if (parsed.priceCatalog && Array.isArray(parsed.priceCatalog) && parsed.priceCatalog.length > 0) {
-              setPriceCatalog(parsed.priceCatalog);
-            } else {
-              setPriceCatalog(DEFAULT_PRICE_CATALOG);
-            }
-            if (parsed.financials && Array.isArray(parsed.financials) && parsed.financials.length > 0) {
-              setFinancials(parsed.financials);
-            } else {
-              setFinancials(DEFAULT_FINANCIAL_RECORDS);
-            }
-            setSettings(parsed.settings || DEFAULT_SETTINGS);
+            if (parsed.priceCatalog?.length) setPriceCatalog(parsed.priceCatalog);
+            if (parsed.financials?.length) setFinancials(parsed.financials);
+            if (parsed.settings) setSettings(parsed.settings);
+            setDbStatus('connected');
+            try {
+              await setDoc(doc(firestoreDb, 'studio_data', 'main'), {
+                ...parsed,
+                updatedAt: new Date().toISOString(),
+              }, { merge: true });
+            } catch (err) {}
           }
         }
-      } catch (e) {
-        console.error('Local fallback read error:', e);
-      }
+      } catch (e) {}
 
-      if (isMounted) {
-        setDbStatus('local_fallback');
-        setIsSyncing(false);
-      }
+      if (isMounted) setIsSyncing(false);
     }
-
-    // Initial load
-    loadData();
-
-    // Auto-sync polling every 6 seconds so Incognito, other tabs & devices always stay updated
-    const syncInterval = setInterval(() => {
-      loadData(true);
-    }, 6000);
-
-    // Sync on window focus or tab visibility change
-    const handleFocus = () => {
-      loadData(true);
-    };
-
-    window.addEventListener('focus', handleFocus);
-    const handleVisibility = () => {
-      if (!document.hidden) loadData(true);
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       isMounted = false;
-      clearInterval(syncInterval);
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleVisibility);
+      if (unsubscribeFirestore) unsubscribeFirestore();
     };
   }, []);
+
+  // Instant real-time multi-browser sync dispatcher
+  const syncToCloud = useCallback(
+    async (overrideData?: {
+      projects?: Project[];
+      clients?: Client[];
+      quotes?: Quote[];
+      inventory?: InventoryItem[];
+      priceCatalog?: PriceCatalogItem[];
+      settings?: StudioSettings;
+      financials?: FinancialRecord[];
+    }) => {
+      try {
+        const payload = {
+          projects: overrideData?.projects || projects,
+          clients: overrideData?.clients || clients,
+          quotes: overrideData?.quotes || quotes,
+          inventory: overrideData?.inventory || inventory,
+          priceCatalog: overrideData?.priceCatalog || priceCatalog,
+          settings: overrideData?.settings || settings,
+          financials: overrideData?.financials || financials,
+          updatedAt: new Date().toISOString(),
+        };
+
+        await setDoc(doc(firestoreDb, 'studio_data', 'main'), payload, { merge: true });
+        setDbStatus('connected');
+        setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
+      } catch (err) {
+        console.warn('Realtime cloud sync notice:', err);
+      }
+    },
+    [projects, clients, quotes, inventory, priceCatalog, settings, financials]
+  );
 
   // Persist state updates to local cache
   const persistLocalCache = useCallback(
@@ -317,6 +337,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = [newProj, ...projects];
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       // Async write to Cloud SQL backend
       fetch('/api/projects', {
@@ -332,7 +353,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return newProj;
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   const updateProject = useCallback(
@@ -347,6 +368,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       const sanitizedUpdates = { ...updates };
       if (sanitizedUpdates.clientId === '') delete (sanitizedUpdates as any).clientId;
@@ -363,7 +385,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         })
         .catch((e) => console.error('Cloud SQL sync error:', e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   const deleteProject = useCallback(
@@ -371,12 +393,13 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = projects.filter((p) => p.id !== id);
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       fetch(`/api/projects/${id}`, { method: 'DELETE' })
         .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
         .catch((e) => console.error('Cloud SQL delete error:', e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   const toggleTaskDone = useCallback(
@@ -398,6 +421,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       fetch(`/api/tasks/${taskId}`, {
         method: 'PUT',
@@ -405,7 +429,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify({ done: targetTaskDone, doneAt: targetTaskDone ? TODAY_ISO() : null }),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   const addTask = useCallback(
@@ -417,6 +441,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       fetch('/api/tasks', {
         method: 'POST',
@@ -424,7 +449,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify({ ...newTask, projectId }),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   const updateTask = useCallback(
@@ -436,6 +461,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       fetch(`/api/tasks/${taskId}`, {
         method: 'PUT',
@@ -443,7 +469,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify(taskUpdates),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   const deleteTask = useCallback(
@@ -454,12 +480,13 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
         .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
         .catch((e) => console.error(e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   const approveProject = useCallback(
@@ -476,6 +503,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       fetch(`/api/projects/${projectId}`, {
         method: 'PUT',
@@ -488,7 +516,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   // Proofs & Client Portal
@@ -516,6 +544,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       fetch('/api/proofs', {
         method: 'POST',
@@ -523,7 +552,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify(newProof),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   const updateProofStatus = useCallback(
@@ -542,6 +571,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       fetch(`/api/proofs/${proofId}`, {
         method: 'PUT',
@@ -549,7 +579,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify({ status }),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   const addProofFeedback = useCallback(
@@ -583,6 +613,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setProjects(updated);
       persistLocalCache(updated);
+      syncToCloud({ projects: updated });
 
       fetch(`/api/proofs/${proofId}/feedback`, {
         method: 'POST',
@@ -590,7 +621,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify(newFeedback),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [projects, persistLocalCache]
+    [projects, persistLocalCache, syncToCloud]
   );
 
   // Client Actions
@@ -607,6 +638,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = [newClient, ...clients];
       setClients(updated);
       persistLocalCache(undefined, updated);
+      syncToCloud({ clients: updated });
 
       fetch('/api/clients', {
         method: 'POST',
@@ -616,7 +648,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return newClient;
     },
-    [clients, persistLocalCache]
+    [clients, persistLocalCache, syncToCloud]
   );
 
   const updateClient = useCallback(
@@ -624,6 +656,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = clients.map((c) => (c.id === id ? { ...c, ...updates } : c));
       setClients(updated);
       persistLocalCache(undefined, updated);
+      syncToCloud({ clients: updated });
 
       fetch(`/api/clients/${id}`, {
         method: 'PUT',
@@ -631,7 +664,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify(updates),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [clients, persistLocalCache]
+    [clients, persistLocalCache, syncToCloud]
   );
 
   const deleteClient = useCallback(
@@ -639,12 +672,13 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = clients.filter((c) => c.id !== id);
       setClients(updated);
       persistLocalCache(undefined, updated);
+      syncToCloud({ clients: updated });
 
       fetch(`/api/clients/${id}`, { method: 'DELETE' })
         .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
         .catch((e) => console.error(e));
     },
-    [clients, persistLocalCache]
+    [clients, persistLocalCache, syncToCloud]
   );
 
   // Quote Actions
@@ -658,6 +692,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = [newQuote, ...quotes];
       setQuotes(updated);
       persistLocalCache(undefined, undefined, updated);
+      syncToCloud({ quotes: updated });
 
       fetch('/api/quotes', {
         method: 'POST',
@@ -667,7 +702,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return newQuote;
     },
-    [quotes, persistLocalCache]
+    [quotes, persistLocalCache, syncToCloud]
   );
 
   const updateQuote = useCallback(
@@ -675,6 +710,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = quotes.map((q) => (q.id === id ? { ...q, ...updates } : q));
       setQuotes(updated);
       persistLocalCache(undefined, undefined, updated);
+      syncToCloud({ quotes: updated });
 
       fetch(`/api/quotes/${id}`, {
         method: 'PUT',
@@ -682,7 +718,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify({ quote: updates, items: updates.items }),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [quotes, persistLocalCache]
+    [quotes, persistLocalCache, syncToCloud]
   );
 
   const deleteQuote = useCallback(
@@ -690,12 +726,13 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = quotes.filter((q) => q.id !== id);
       setQuotes(updated);
       persistLocalCache(undefined, undefined, updated);
+      syncToCloud({ quotes: updated });
 
       fetch(`/api/quotes/${id}`, { method: 'DELETE' })
         .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
         .catch((e) => console.error(e));
     },
-    [quotes, persistLocalCache]
+    [quotes, persistLocalCache, syncToCloud]
   );
 
   // Inventory Actions
@@ -708,6 +745,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = [newItem, ...inventory];
       setInventory(updated);
       persistLocalCache(undefined, undefined, undefined, updated);
+      syncToCloud({ inventory: updated });
 
       fetch('/api/inventory', {
         method: 'POST',
@@ -717,7 +755,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return newItem;
     },
-    [inventory, persistLocalCache]
+    [inventory, persistLocalCache, syncToCloud]
   );
 
   const updateInventoryItem = useCallback(
@@ -725,6 +763,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = inventory.map((i) => (i.id === id ? { ...i, ...updates } : i));
       setInventory(updated);
       persistLocalCache(undefined, undefined, undefined, updated);
+      syncToCloud({ inventory: updated });
 
       fetch(`/api/inventory/${id}`, {
         method: 'PUT',
@@ -732,7 +771,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify(updates),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [inventory, persistLocalCache]
+    [inventory, persistLocalCache, syncToCloud]
   );
 
   const adjustStock = useCallback(
@@ -746,6 +785,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setInventory(updated);
       persistLocalCache(undefined, undefined, undefined, updated);
+      syncToCloud({ inventory: updated });
 
       fetch(`/api/inventory/${id}`, {
         method: 'PUT',
@@ -753,7 +793,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify({ qty: String(nextVal) }),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [inventory, persistLocalCache]
+    [inventory, persistLocalCache, syncToCloud]
   );
 
   const deleteInventoryItem = useCallback(
@@ -761,12 +801,13 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = inventory.filter((i) => i.id !== id);
       setInventory(updated);
       persistLocalCache(undefined, undefined, undefined, updated);
+      syncToCloud({ inventory: updated });
 
       fetch(`/api/inventory/${id}`, { method: 'DELETE' })
         .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
         .catch((e) => console.error(e));
     },
-    [inventory, persistLocalCache]
+    [inventory, persistLocalCache, syncToCloud]
   );
 
   // Price Catalog Actions
@@ -779,6 +820,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = [...priceCatalog, newItem];
       setPriceCatalog(updated);
       persistLocalCache(undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ priceCatalog: updated });
 
       fetch('/api/price-catalog', {
         method: 'POST',
@@ -788,7 +830,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return newItem;
     },
-    [priceCatalog, persistLocalCache]
+    [priceCatalog, persistLocalCache, syncToCloud]
   );
 
   const updatePriceCatalogItem = useCallback(
@@ -796,6 +838,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = priceCatalog.map((item) => (item.id === id ? { ...item, ...updates } : item));
       setPriceCatalog(updated);
       persistLocalCache(undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ priceCatalog: updated });
 
       fetch(`/api/price-catalog/${id}`, {
         method: 'PUT',
@@ -803,7 +846,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify(updates),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [priceCatalog, persistLocalCache]
+    [priceCatalog, persistLocalCache, syncToCloud]
   );
 
   const deletePriceCatalogItem = useCallback(
@@ -811,12 +854,13 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = priceCatalog.filter((item) => item.id !== id);
       setPriceCatalog(updated);
       persistLocalCache(undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ priceCatalog: updated });
 
       fetch(`/api/price-catalog/${id}`, { method: 'DELETE' })
         .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
         .catch((e) => console.error(e));
     },
-    [priceCatalog, persistLocalCache]
+    [priceCatalog, persistLocalCache, syncToCloud]
   );
 
   // Financial Actions (Bilancio Studio & Spese/Entrate di Progetto)
@@ -830,6 +874,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = [newRecord, ...financials];
       setFinancials(updated);
       persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ financials: updated });
 
       fetch('/api/finances', {
         method: 'POST',
@@ -841,7 +886,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return newRecord;
     },
-    [financials, persistLocalCache]
+    [financials, persistLocalCache, syncToCloud]
   );
 
   const updateFinancialRecord = useCallback(
@@ -849,6 +894,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = financials.map((f) => (f.id === id ? { ...f, ...updates } : f));
       setFinancials(updated);
       persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ financials: updated });
 
       fetch(`/api/finances/${id}`, {
         method: 'PUT',
@@ -858,7 +904,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
         .catch((e) => console.error('Cloud SQL finance update error:', e));
     },
-    [financials, persistLocalCache]
+    [financials, persistLocalCache, syncToCloud]
   );
 
   const deleteFinancialRecord = useCallback(
@@ -866,12 +912,13 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = financials.filter((f) => f.id !== id);
       setFinancials(updated);
       persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ financials: updated });
 
       fetch(`/api/finances/${id}`, { method: 'DELETE' })
         .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
         .catch((e) => console.error('Cloud SQL finance delete error:', e));
     },
-    [financials, persistLocalCache]
+    [financials, persistLocalCache, syncToCloud]
   );
 
   // Settings
@@ -880,6 +927,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const updated = { ...settings, ...updates };
       setSettings(updated);
       persistLocalCache(undefined, undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ settings: updated });
 
       fetch('/api/settings', {
         method: 'PUT',
@@ -887,7 +935,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify(updates),
       }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
     },
-    [settings, persistLocalCache]
+    [settings, persistLocalCache, syncToCloud]
   );
 
   const connectSupabase = useCallback(async (_url: string, _key: string) => {
@@ -967,6 +1015,34 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const refreshFromDatabase = useCallback(async (): Promise<boolean> => {
     setIsSyncing(true);
     try {
+      // 1. Try Firestore direct first (works across all browsers and devices)
+      const snap = await getDoc(doc(firestoreDb, 'studio_data', 'main'));
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data) {
+          if (Array.isArray(data.projects)) setProjects(data.projects);
+          if (Array.isArray(data.clients)) setClients(data.clients);
+          if (Array.isArray(data.quotes)) setQuotes(data.quotes);
+          if (Array.isArray(data.inventory)) setInventory(data.inventory);
+          if (Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
+            setPriceCatalog(data.priceCatalog);
+          }
+          if (Array.isArray(data.financials) && data.financials.length > 0) {
+            setFinancials(data.financials);
+          }
+          if (data.settings) setSettings(data.settings);
+          setDbStatus('connected');
+          const time = new Date().toLocaleTimeString('it-IT');
+          setLastSyncedAt(time);
+          setIsSyncing(false);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('Firestore direct refresh error, trying backend:', e);
+    }
+
+    try {
       const res = await fetch('/api/studio/data');
       if (res.ok) {
         const data = await res.json();
@@ -990,7 +1066,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
     } catch (e) {
-      console.error('Failed to refresh data from Cloud SQL:', e);
+      console.error('Failed to refresh data from Cloud SQL backend:', e);
     }
     setIsSyncing(false);
     return false;

@@ -89,7 +89,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {/* Database Live Status Badge & Refresh */}
           <div
             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-[#e5e9e3] text-xs text-[#3d5243] shadow-2xs shrink-0"
-            title="Database Cloud SQL (PostgreSQL) - Sincronizzato costantemente tra tutti i browser e computer"
+            title="Cloud Sync in tempo reale attivo - Sincronizzato istantaneamente tra tutti i browser (normale, incognito), PC e dispositivi"
           >
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
@@ -97,16 +97,16 @@ export const TopBar: React.FC<TopBarProps> = ({
               }`}
             />
             <span className="font-semibold text-[11px] text-[#244d3b] hidden xs:inline sm:inline">
-              Cloud SQL
+              Cloud Sync
             </span>
             <span className="text-[10px] text-[#78867d] hidden sm:inline">
-              {isSyncing ? 'Sync...' : lastSyncedAt ? `Sync ${lastSyncedAt}` : 'Live'}
+              {isSyncing ? 'Sync...' : lastSyncedAt ? `Live ${lastSyncedAt}` : 'Live'}
             </span>
             <button
               onClick={() => refreshFromDatabase()}
               disabled={isSyncing}
               className="p-1 hover:bg-[#edf2eb] text-[#244d3b] rounded-lg transition-colors cursor-pointer"
-              title="Aggiorna e risincronizza con Cloud SQL adesso"
+              title="Forza risincronizzazione immediata da Cloud"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
             </button>
