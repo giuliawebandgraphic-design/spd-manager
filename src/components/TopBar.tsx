@@ -1,6 +1,6 @@
-import React from 'react';
-import { Menu, Search, Plus, Calendar, Database, Sparkles } from 'lucide-react';
+import { Menu, Search, Plus, Calendar, Database, RefreshCw } from 'lucide-react';
 import { ViewType } from '../types';
+import { useStudio } from '../context/StudioContext';
 
 interface TopBarProps {
   currentView: ViewType;
@@ -21,7 +21,7 @@ const VIEW_TITLES: Record<ViewType, [string, string]> = {
   finances: ['Bilancio & Finanze dello Studio.', 'Gestione spese, entrate, utile netto, riepilogo mensile e bilancio annuo.'],
   inventory: ['Materiali sotto controllo.', 'Scorte carte pregiate, buste, nastri e soglie di riordino.'],
   portal: ['Portale Cliente Protetto.', 'Accesso riservato per visualizzazione bozze, feedback e approvazione.'],
-  settings: ['Configurazione Studio & Cloud.', 'Capacità Giulia & Claudia, parametri economici, Supabase e Google Calendar.'],
+  settings: ['Configurazione Studio & Cloud.', 'Capacità Giulia & Claudia, parametri economici, Cloud SQL e Google Calendar.'],
 };
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -31,6 +31,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onSearchChange,
   onQuickNew,
 }) => {
+  const { dbStatus, isSyncing, lastSyncedAt, refreshFromDatabase } = useStudio();
   const [title, subtitle] = VIEW_TITLES[currentView] || VIEW_TITLES.dashboard;
 
   const todayFormatted = new Intl.DateTimeFormat('it-IT', {
@@ -63,10 +64,10 @@ export const TopBar: React.FC<TopBarProps> = ({
           </div>
         </div>
 
-        {/* Right: Search, Date, Quick New */}
-        <div className="flex items-center gap-3 w-full md:w-auto">
+        {/* Right: Search, DB Status, Date, Quick New */}
+        <div className="flex items-center gap-2.5 w-full md:w-auto">
           {/* Search box */}
-          <div className="relative flex-1 md:w-64">
+          <div className="relative flex-1 md:w-56">
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8a968c]" />
             <input
               type="text"
@@ -83,6 +84,30 @@ export const TopBar: React.FC<TopBarProps> = ({
                 ✕
               </button>
             )}
+          </div>
+
+          {/* Database Live Status Badge & Refresh */}
+          <div
+            className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[#e5e9e3] text-xs text-[#3d5243] shadow-2xs"
+            title="Database Cloud SQL (PostgreSQL) - i dati sono salvati permanentemente"
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                dbStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+              }`}
+            />
+            <span className="font-semibold text-[11px] text-[#244d3b]">Database</span>
+            <span className="text-[10px] text-[#78867d]">
+              {isSyncing ? 'Sincronizzazione...' : lastSyncedAt ? `Sync ${lastSyncedAt}` : 'Connesso'}
+            </span>
+            <button
+              onClick={() => refreshFromDatabase()}
+              disabled={isSyncing}
+              className="p-1 hover:bg-[#edf2eb] text-[#244d3b] rounded-lg transition-colors ml-0.5"
+              title="Aggiorna e consulta il database adesso"
+            >
+              <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+            </button>
           </div>
 
           {/* Date indicator */}

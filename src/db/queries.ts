@@ -271,6 +271,7 @@ export async function insertClientRecord(client: any) {
       taxId: client.taxId || null,
       notes: client.notes || '',
       portalToken: client.portalToken,
+      portalPassword: client.portalPassword || null,
       portalEnabled: Boolean(client.portalEnabled),
       createdAt: client.createdAt,
       fiscalType: client.fiscalType || null,

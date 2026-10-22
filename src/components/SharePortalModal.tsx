@@ -44,6 +44,7 @@ export const SharePortalModal: React.FC<SharePortalModalProps> = ({
     project || (client ? projects.find((p) => p.clientId === client.id) : null);
 
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedPassword, setCopiedPassword] = useState(false);
   const [copiedMessage, setCopiedMessage] = useState(false);
   const [activeTab, setActiveTab] = useState<'share' | 'qrcode' | 'security'>('share');
   const [selectedPreset, setSelectedPreset] = useState<'proof' | 'approval' | 'welcome' | 'fiscal'>(
@@ -57,25 +58,28 @@ export const SharePortalModal: React.FC<SharePortalModalProps> = ({
     ? `${window.location.origin}/#portal?token=${client.portalToken}`
     : '';
 
-  // Preset message templates
+  const clientPassword = client?.portalPassword || 'SP-' + (client?.name?.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'SAGE') + '-2026';
+
+  // Preset message templates with link and assigned password
   const getPresetMessage = () => {
     if (!client) return '';
     const projectName = activeProject ? ` "${activeProject.name}"` : '';
+    const pwdInfo = `\n🔗 Link riservato: ${portalUrl}\n🔑 Password di accesso assegnata: ${clientPassword}\n`;
 
     if (selectedPreset === 'fiscal') {
-      return `Gentile ${client.name},\n\nper poter procedere con la corretta emissione della documentazione fiscale e la conferma del vostro progetto${projectName}, vi chiediamo gentilmente di inserire i vostri estremi fiscali (Codice Fiscale o P.IVA, indirizzo di fatturazione e codice SDI) accedendo al vostro Portale Riservato:\n${portalUrl}\n${customNote ? `\nNota dallo studio: ${customNote}\n` : ''}\nGrazie per la preziosa collaborazione,\nGiulia & Claudia · Sage Paper Design Firenze`;
+      return `Gentile ${client.name},\n\nper poter procedere con la corretta emissione della documentazione fiscale e la conferma del vostro progetto${projectName}, vi chiediamo gentilmente di inserire i vostri estremi fiscali (Codice Fiscale o P.IVA, indirizzo di fatturazione e codice SDI) accedendo alla vostra Scheda Riservata:${pwdInfo}${customNote ? `\nNota dallo studio: ${customNote}\n` : ''}\nGrazie per la preziosa collaborazione,\nGiulia & Claudia · Sage Paper Design Firenze`;
     }
 
     if (selectedPreset === 'proof') {
-      return `Gentile ${client.name},\n\nabbiamo preparato e caricato una nuova bozza grafica per il vostro progetto${projectName} su Sage Paper Design.\n\nPotete visualizzare l'anteprima ad alta risoluzione, inserire note e richieste di modifica al seguente link riservato:\n${portalUrl}\n${customNote ? `\nNota dallo studio: ${customNote}\n` : ''}\nRestiamo a vostra disposizione,\nGiulia & Claudia · Sage Paper Design`;
+      return `Gentile ${client.name},\n\nabbiamo preparato e caricato una nuova bozza grafica per il vostro progetto${projectName} su Sage Paper Design.\n\nPotete visualizzare l'anteprima ad alta risoluzione, inserire note e richieste di modifica al seguente link riservato:${pwdInfo}${customNote ? `\nNota dallo studio: ${customNote}\n` : ''}\nRestiamo a vostra disposizione,\nGiulia & Claudia · Sage Paper Design`;
     }
 
     if (selectedPreset === 'approval') {
-      return `Gentile ${client.name},\n\nla bozza esecutiva per il vostro progetto${projectName} è pronta per la verifica finale.\n\nVi chiediamo di accedere al vostro Portale Riservato per confermare l'Approvazione Esecutiva di Stampa, necessaria per avviare il taglio e la produzione artigianale:\n${portalUrl}\n${customNote ? `\nNota: ${customNote}\n` : ''}\nUn caro saluto,\nGiulia & Claudia · Sage Paper Design`;
+      return `Gentile ${client.name},\n\nla bozza esecutiva per il vostro progetto${projectName} è pronta per la verifica finale.\n\nVi chiediamo di accedere alla vostra Scheda Riservata per confermare l'Approvazione Esecutiva di Stampa, necessaria per avviare il taglio e la produzione artigianale:${pwdInfo}${customNote ? `\nNota: ${customNote}\n` : ''}\nUn caro saluto,\nGiulia & Claudia · Sage Paper Design`;
     }
 
     // welcome
-    return `Gentile ${client.name},\n\nbenvenuti nel vostro Portale Riservato di Sage Paper Design.\n\nAttraverso questo spazio protetto potrete seguire in tempo reale tutte le fasi di lavorazione${projectName ? ` di${projectName}` : ''}, consultare i preventivi, compilare i dati fiscali e approvare le bozze grafiche:\n${portalUrl}\n${customNote ? `\nNota: ${customNote}\n` : ''}\nCon affetto,\nGiulia & Claudia · Sage Paper Design Firenze`;
+    return `Gentile ${client.name},\n\nbenvenuti nel vostro Spazio Riservato di Sage Paper Design.\n\nAttraverso questo spazio protetto potrete esaminare la vostra scheda cliente, seguire in tempo reale tutte le fasi di lavorazione${projectName ? ` di${projectName}` : ''}, consultare i preventivi, compilare i dati fiscali e approvare le bozze grafiche:${pwdInfo}${customNote ? `\nNota: ${customNote}\n` : ''}\nCon affetto,\nGiulia & Claudia · Sage Paper Design Firenze`;
   };
 
   const messageText = getPresetMessage();
@@ -85,6 +89,19 @@ export const SharePortalModal: React.FC<SharePortalModalProps> = ({
     navigator.clipboard.writeText(portalUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
+  };
+
+  const handleCopyPassword = () => {
+    if (!clientPassword) return;
+    navigator.clipboard.writeText(clientPassword);
+    setCopiedPassword(true);
+    setTimeout(() => setCopiedPassword(false), 2500);
+  };
+
+  const handleRegeneratePassword = () => {
+    if (!client) return;
+    const newPwd = 'SP-' + (client.name.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'SP') + '-' + Math.floor(1000 + Math.random() * 9000);
+    updateClient(client.id, { portalPassword: newPwd });
   };
 
   const handleCopyFullMessage = () => {
@@ -237,6 +254,49 @@ export const SharePortalModal: React.FC<SharePortalModalProps> = ({
                     )}
                   </button>
                 </div>
+              </div>
+
+              {/* Password Box */}
+              <div>
+                <label className="block text-xs font-bold text-[#263a32] mb-1.5 flex items-center justify-between">
+                  <span>Password di Accesso Assegnata al Cliente</span>
+                  <span className="text-[10px] text-[#78867d] font-medium flex items-center gap-1">
+                    <Lock className="w-3 h-3 text-[#244d3b]" /> Richiesta all'apertura del link
+                  </span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 bg-[#f4f7f3] border border-[#dce5da] rounded-xl px-3 py-2 text-xs font-mono font-bold text-[#244d3b] tracking-wider select-all">
+                    {clientPassword}
+                  </div>
+                  <button
+                    onClick={handleCopyPassword}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs shrink-0 ${
+                      copiedPassword
+                        ? 'bg-[#296839] text-white'
+                        : 'bg-[#edf2eb] hover:bg-[#e2ebe0] text-[#244d3b] border border-[#ccd6ca]'
+                    }`}
+                  >
+                    {copiedPassword ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-white" /> Copiata!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-[#244d3b]" /> Copia Password
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleRegeneratePassword}
+                    className="p-2 rounded-xl bg-white border border-[#ccd6ca] hover:bg-[#fafbf9] text-[#244d3b] text-xs font-semibold shadow-2xs"
+                    title="Rigenera una nuova password per questo cliente"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-[#78867d] mt-1">
+                  Il cliente dovrà digitare questa password per sbloccare la propria scheda e visualizzare le bozze.
+                </p>
               </div>
 
               {/* Direct Instant Action Buttons */}

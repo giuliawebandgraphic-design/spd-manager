@@ -490,3 +490,13 @@ export const DEFAULT_FINANCIAL_RECORDS: FinancialRecord[] = [
     createdAt: '2026-10-08',
   },
 ];
+
+export function generatePortalPassword(clientName?: string): string {
+  const letters = clientName
+    ? clientName.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase()
+    : 'SP';
+  const prefix = letters.length >= 2 ? letters : 'SAGE';
+  const code = Math.floor(1000 + Math.random() * 9000);
+  return `${prefix}-${code}`;
+}
+

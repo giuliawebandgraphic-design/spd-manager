@@ -13,7 +13,7 @@ import {
   PriceCatalogItem,
   FinancialRecord,
 } from '../types';
-import { buildDefaultTasks, generateId, DEFAULT_PRICE_CATALOG, DEFAULT_FINANCIAL_RECORDS } from '../lib/constants';
+import { buildDefaultTasks, generateId, DEFAULT_PRICE_CATALOG, DEFAULT_FINANCIAL_RECORDS, generatePortalPassword } from '../lib/constants';
 import { computeBackwardPlans, TODAY_ISO, addDays, ComputedPlannerResult } from '../lib/plannerEngine';
 
 const LOCAL_STORAGE_KEY = 'sage_paper_studio_manager_v2';
@@ -110,6 +110,7 @@ interface StudioContextType {
   exportBackupJson: () => string;
   importBackupJson: (jsonStr: string) => boolean;
   resetStudioData: () => void;
+  refreshFromDatabase: () => Promise<boolean>;
 }
 
 const StudioContext = createContext<StudioContextType | undefined>(undefined);
@@ -525,6 +526,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ...clientData,
         id: 'c_' + generateId(),
         portalToken: 'portal_' + generateId(),
+        portalPassword: clientData.portalPassword || generatePortalPassword(clientData.name),
         portalEnabled: true,
         createdAt: TODAY_ISO(),
       };
@@ -888,6 +890,38 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       .catch((e) => console.error(e));
   }, []);
 
+  const refreshFromDatabase = useCallback(async (): Promise<boolean> => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/studio/data');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.projects)) {
+          setProjects(data.projects);
+          setClients(data.clients || []);
+          setQuotes(data.quotes || []);
+          setInventory(data.inventory || []);
+          if (data.priceCatalog && Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
+            setPriceCatalog(data.priceCatalog);
+          }
+          if (data.financials && Array.isArray(data.financials) && data.financials.length > 0) {
+            setFinancials(data.financials);
+          }
+          if (data.settings) setSettings(data.settings);
+          setDbStatus('connected');
+          const time = new Date().toLocaleTimeString('it-IT');
+          setLastSyncedAt(time);
+          setIsSyncing(false);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to refresh data from Cloud SQL:', e);
+    }
+    setIsSyncing(false);
+    return false;
+  }, []);
+
   return (
     <StudioContext.Provider
       value={{
@@ -935,6 +969,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         exportBackupJson,
         importBackupJson,
         resetStudioData,
+        refreshFromDatabase,
       }}
     >
       {children}

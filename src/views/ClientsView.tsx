@@ -15,6 +15,7 @@ import {
   FileText,
   CheckCircle2,
   AlertCircle,
+  Lock,
 } from 'lucide-react';
 import { Client, ViewType } from '../types';
 import { useStudio } from '../context/StudioContext';
@@ -223,8 +224,9 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   <span>
                     <strong className="text-[#21362d]">{clientProjects.length}</strong> progetti
                   </span>
-                  <span>
-                    <strong className="text-[#21362d]">{clientQuotes.length}</strong> preventivi
+                  <span className="inline-flex items-center gap-1 font-mono text-[11px] font-bold text-[#244d3b] bg-[#edf2eb] px-2 py-0.5 rounded-md border border-[#d5e2d3]" title="Password assegnata al cliente per accedere al portale">
+                    <Lock className="w-2.5 h-2.5" />
+                    {client.portalPassword || 'SP-2026'}
                   </span>
                 </div>
 

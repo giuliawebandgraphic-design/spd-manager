@@ -22,6 +22,7 @@ export const clients = pgTable('clients', {
   taxId: text('tax_id'),
   notes: text('notes').default(''),
   portalToken: text('portal_token').notNull().unique(),
+  portalPassword: text('portal_password'),
   portalEnabled: boolean('portal_enabled').notNull().default(true),
   createdAt: text('created_at').notNull(),
   fiscalType: text('fiscal_type'),

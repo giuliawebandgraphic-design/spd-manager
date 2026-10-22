@@ -14,6 +14,7 @@ import {
   Shield,
   Key,
   ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { SUPABASE_SQL_SCHEMA } from '../db/schemaSql';
 import { useStudio } from '../context/StudioContext';
@@ -28,6 +29,14 @@ export const SettingsView: React.FC = () => {
     exportBackupJson,
     importBackupJson,
     resetStudioData,
+    clients,
+    quotes,
+    inventory,
+    priceCatalog,
+    financials,
+    isSyncing,
+    lastSyncedAt,
+    refreshFromDatabase,
     projects,
     plannerResult,
   } = useStudio();
@@ -39,6 +48,7 @@ export const SettingsView: React.FC = () => {
   const [vat, setVat] = useState(settings.vat || 22);
   const [deposit, setDeposit] = useState(settings.deposit || 40);
   const [savedSettingsSuccess, setSavedSettingsSuccess] = useState(false);
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
 
   // Supabase connection state
   const [supabaseUrl, setSupabaseUrl] = useState(import.meta.env.VITE_SUPABASE_URL || '');
@@ -55,6 +65,14 @@ export const SettingsView: React.FC = () => {
 
   // Backup import
   const [importStatus, setImportStatus] = useState<string | null>(null);
+
+  const handleManualSync = async () => {
+    const ok = await refreshFromDatabase();
+    if (ok) {
+      setRefreshSuccess(true);
+      setTimeout(() => setRefreshSuccess(false), 2500);
+    }
+  };
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -248,7 +266,7 @@ export const SettingsView: React.FC = () => {
 
       {/* 2. Cloud SQL PostgreSQL Database Integration */}
       <div className="p-6 bg-white rounded-2xl border border-[#e5e9e3] shadow-xs space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-xl bg-[#edf2eb] text-[#244d3b] flex items-center justify-center">
               <Database className="w-4 h-4" />
@@ -258,21 +276,74 @@ export const SettingsView: React.FC = () => {
                 Database Relazionale Cloud SQL (PostgreSQL)
               </h3>
               <p className="text-xs text-[#78867d]">
-                Persistenza cloud attiva in europe-west1 con Drizzle ORM e tabelle relazionali collegate
+                Persistenza cloud continua: tutti i dati sono memorizzati in modo permanente e sempre consultabili
               </p>
             </div>
           </div>
 
-          <span className="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-[#e7f3e8] text-[#2e593d]">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> PostgreSQL Live Connesso
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-[#e7f3e8] text-[#2e593d]">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> PostgreSQL Live Connesso
+            </span>
+            <button
+              type="button"
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="px-3 py-1.5 rounded-xl bg-[#244d3b] hover:bg-[#1e3f30] text-white text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Sincronizzazione...' : 'Sincronizza / Consulta Ora'}</span>
+            </button>
+          </div>
         </div>
+
+        {refreshSuccess && (
+          <div className="p-3 bg-[#e7f3e8] border border-[#c4e2c6] text-[#295e38] text-xs font-semibold rounded-xl flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span>Database sincronizzato con successo alle {lastSyncedAt || new Date().toLocaleTimeString('it-IT')}! Tutti i record sono allineati.</span>
+          </div>
+        )}
 
         <p className="text-xs text-[#5d6e64] leading-relaxed">
           Il database <strong>Cloud SQL PostgreSQL</strong> è collegato e operativo. Tutte le modifiche apportate ai
-          progetti, alle checklist, alle bozze del portale cliente, ai preventivi e alle giacenze del magazzino vengono
-          salvate direttamente in PostgreSQL, mantenendo lo Studio Manager costantemente aggiornato e sincronizzato.
+          progetti, alle checklist di produzione, alle bozze del portale cliente, ai preventivi, alle giacenze del magazzino e alle registrazioni finanziarie (spese ed entrate) vengono
+          salvate direttamente in PostgreSQL, garantendo che il database rimanga <strong>costantemente aggiornato e consultabile in qualsiasi momento</strong>.
         </p>
+
+        {/* Live Database Record Counters */}
+        <div className="space-y-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-[#78867d] block">
+            Riepilogo Record Salvati nel Database
+          </span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            <div className="p-3 bg-[#fafbf9] rounded-xl border border-[#e5e9e3] text-center">
+              <span className="text-xl font-bold text-[#244d3b] block">{projects.length}</span>
+              <span className="text-[11px] text-[#78867d]">Progetti</span>
+            </div>
+            <div className="p-3 bg-[#fafbf9] rounded-xl border border-[#e5e9e3] text-center">
+              <span className="text-xl font-bold text-[#244d3b] block">{clients.length}</span>
+              <span className="text-[11px] text-[#78867d]">Clienti</span>
+            </div>
+            <div className="p-3 bg-[#fafbf9] rounded-xl border border-[#e5e9e3] text-center">
+              <span className="text-xl font-bold text-[#244d3b] block">
+                {projects.reduce((sum, p) => sum + (p.proofs?.length || 0), 0)}
+              </span>
+              <span className="text-[11px] text-[#78867d]">Bozze & File</span>
+            </div>
+            <div className="p-3 bg-[#fafbf9] rounded-xl border border-[#e5e9e3] text-center">
+              <span className="text-xl font-bold text-[#244d3b] block">{quotes.length}</span>
+              <span className="text-[11px] text-[#78867d]">Preventivi</span>
+            </div>
+            <div className="p-3 bg-[#fafbf9] rounded-xl border border-[#e5e9e3] text-center">
+              <span className="text-xl font-bold text-[#244d3b] block">{inventory.length}</span>
+              <span className="text-[11px] text-[#78867d]">Articoli Magazzino</span>
+            </div>
+            <div className="p-3 bg-[#fafbf9] rounded-xl border border-[#e5e9e3] text-center">
+              <span className="text-xl font-bold text-[#244d3b] block">{financials.length}</span>
+              <span className="text-[11px] text-[#78867d]">Movimenti Finanze</span>
+            </div>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-[#fafbf9] rounded-xl border border-[#eef2ec] text-xs">
           <div>
@@ -284,8 +355,11 @@ export const SettingsView: React.FC = () => {
             <strong className="text-[#21362d]">europe-west1 (Belgio)</strong>
           </div>
           <div>
-            <span className="text-[10px] uppercase font-bold text-[#8a968c] block">ORM & Driver</span>
-            <strong className="text-[#21362d]">Drizzle ORM & node-postgres</strong>
+            <span className="text-[10px] uppercase font-bold text-[#8a968c] block">Stato Sincronizzazione</span>
+            <strong className="text-[#21362d] flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              {lastSyncedAt ? `Aggiornato alle ${lastSyncedAt}` : 'In linea'}
+            </strong>
           </div>
         </div>
 

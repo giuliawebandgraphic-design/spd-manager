@@ -14,6 +14,8 @@ import {
   FileText,
   CheckCircle2,
   AlertCircle,
+  Lock,
+  RefreshCw,
 } from 'lucide-react';
 import {
   Project,
@@ -29,7 +31,7 @@ import {
   TeamMemberName,
   GateType,
 } from '../types';
-import { TYPE_NAMES, STATUS_NAMES, MASTER_CATALOG, generateId } from '../lib/constants';
+import { TYPE_NAMES, STATUS_NAMES, MASTER_CATALOG, generateId, generatePortalPassword } from '../lib/constants';
 import { formatMoney, TODAY_ISO, addDays } from '../lib/plannerEngine';
 import { useStudio } from '../context/StudioContext';
 
@@ -297,6 +299,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
   const [phone, setPhone] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [notes, setNotes] = useState('');
+  const [portalPassword, setPortalPassword] = useState('');
 
   // Fiscal fields
   const [showFiscalDetails, setShowFiscalDetails] = useState(false);
@@ -322,6 +325,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
       setPhone(client.phone || '');
       setCompanyName(client.companyName || '');
       setNotes(client.notes || '');
+      setPortalPassword(client.portalPassword || generatePortalPassword(client.name));
 
       setFiscalType(client.fiscalType || (client.type === 'Azienda' ? 'azienda' : client.type === 'Professionista' ? 'libero_professionista' : 'privato'));
       setCompanyLegalName(client.companyLegalName || client.companyName || client.name || '');
@@ -346,6 +350,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
       setPhone('');
       setCompanyName('');
       setNotes('');
+      setPortalPassword(generatePortalPassword('SP'));
 
       setFiscalType('privato');
       setCompanyLegalName('');
@@ -396,6 +401,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
         phone: phone.trim(),
         companyName: companyName.trim() || undefined,
         notes: notes.trim(),
+        portalPassword: portalPassword.trim() || undefined,
         ...fiscalPayload,
       });
     } else {
@@ -406,6 +412,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
         phone: phone.trim(),
         companyName: companyName.trim() || undefined,
         notes: notes.trim(),
+        portalPassword: portalPassword.trim() || undefined,
         portalEnabled: true,
         ...fiscalPayload,
       });
@@ -489,6 +496,38 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
               placeholder="Canale preferito, wedding planner collegato..."
               className="w-full text-xs p-2.5 rounded-xl bg-white border border-[#e5e9e3] focus:border-[#68816e] focus:outline-hidden resize-none"
             />
+          </div>
+
+          {/* Password Spazio Riservato Cliente */}
+          <div className="p-3 bg-[#f8faf6] rounded-xl border border-[#e5e9e3] space-y-1.5">
+            <label className="block text-xs font-bold text-[#263a32] flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-[#244d3b]" />
+                Password Spazio Riservato Cliente *
+              </span>
+              <span className="text-[10px] text-[#78867d]">Accesso con link + password</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={portalPassword}
+                onChange={(e) => setPortalPassword(e.target.value)}
+                placeholder="Es. SP-7492"
+                className="flex-1 text-xs p-2 rounded-xl bg-white border border-[#e5e9e3] focus:border-[#68816e] focus:outline-hidden font-mono font-bold text-[#244d3b]"
+              />
+              <button
+                type="button"
+                onClick={() => setPortalPassword(generatePortalPassword(name || 'SP'))}
+                className="px-2.5 py-2 rounded-xl bg-white border border-[#ccd6ca] hover:bg-[#edf2eb] text-[#244d3b] text-xs font-semibold flex items-center gap-1 shrink-0 shadow-2xs"
+                title="Genera nuova password casuale"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Genera</span>
+              </button>
+            </div>
+            <p className="text-[10px] text-[#78867d]">
+              Il cliente dovrà inserire questa password per accedere alla propria scheda e consultare le bozze.
+            </p>
           </div>
 
           {/* Dati Fiscali Section Toggle */}

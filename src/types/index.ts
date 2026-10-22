@@ -78,6 +78,7 @@ export interface Client {
   address?: string;
   notes?: string;
   portalToken: string;
+  portalPassword?: string;
   portalEnabled: boolean;
   createdAt?: string;
 
