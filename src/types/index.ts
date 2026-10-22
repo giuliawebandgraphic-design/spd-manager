@@ -1,4 +1,20 @@
-export type ProjectType = 'wedding' | 'b2b' | 'website' | 'retail' | 'design' | 'other';
+export type ProjectType =
+  | 'eventi'
+  | 'grafica'
+  | 'cartoleria'
+  | 'wedding'
+  | 'b2b'
+  | 'website'
+  | 'retail'
+  | 'design'
+  | 'other';
+
+export type EventProductType =
+  | 'partecipazioni'
+  | 'coordinati'
+  | 'bomboniere'
+  | 'sito_wedding'
+  | 'allestimento_grafico';
 
 export type ProjectStatus = 'new' | 'active' | 'review' | 'production' | 'completed' | 'paused';
 
@@ -50,6 +66,7 @@ export interface Project {
   name: string;
   clientId: string;
   type: ProjectType;
+  eventProducts?: EventProductType[];
   due: string; // YYYY-MM-DD
   eventDate?: string; // YYYY-MM-DD
   status: ProjectStatus;

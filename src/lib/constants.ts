@@ -1,13 +1,77 @@
-import { ProjectType, ProjectStatus, Task, TeamMemberName, GateType, PriceCatalogItem, FinancialRecord } from '../types';
+import { ProjectType, EventProductType, ProjectStatus, Task, TeamMemberName, GateType, PriceCatalogItem, FinancialRecord } from '../types';
 
 export const TYPE_NAMES: Record<ProjectType, string> = {
-  wedding: 'Wedding & eventi',
-  b2b: 'B2B · Stampa',
-  website: 'Wedding website',
-  retail: 'Shop & retail',
-  design: 'Grafica su misura',
+  eventi: 'Eventi & Nozze',
+  grafica: 'Progetti Grafici',
+  cartoleria: 'Cartoleria & Stampe',
+  wedding: 'Eventi & Nozze',
+  b2b: 'Cartoleria & Stampe B2B',
+  website: 'Progetti Grafici & Web',
+  retail: 'Cartoleria & Shop',
+  design: 'Progetti Grafici su Misura',
   other: 'Altro',
 };
+
+export const MAIN_PROJECT_TYPES: { id: ProjectType; label: string; description: string; badge: string }[] = [
+  {
+    id: 'eventi',
+    label: 'Eventi (Nozze, Cerimonie & Party)',
+    description: 'Partecipazioni, coordinati banchetto, bomboniere, allestimento grafico e sito wedding.',
+    badge: 'bg-[#edf2eb] text-[#244d3b]',
+  },
+  {
+    id: 'grafica',
+    label: 'Progetti Grafici',
+    description: 'Brand identity, logotipi, grafica editoriale, illustrazioni su misura e layout digitali.',
+    badge: 'bg-[#fff5ea] text-[#9c5d24]',
+  },
+  {
+    id: 'cartoleria',
+    label: 'Cartoleria & Stampe',
+    description: 'Stampe artigianali, stationery shop, fustellati sagomati, campionari e confezioni.',
+    badge: 'bg-[#e7f0f6] text-[#245778]',
+  },
+];
+
+export interface EventProductItem {
+  id: EventProductType;
+  label: string;
+  badge: string;
+  description: string;
+}
+
+export const EVENT_PRODUCTS_LIST: EventProductItem[] = [
+  {
+    id: 'partecipazioni',
+    label: 'Partecipazioni & Inviti',
+    badge: 'Buste, Sigilli, RSVP',
+    description: 'Suite invito nozze, cartoncino dettagli/RSVP, busta foderata e sigilli in ceralacca.',
+  },
+  {
+    id: 'coordinati',
+    label: 'Coordinati Tavolo & Cerimonia',
+    badge: 'Menù, Tableau, Segnaposto',
+    description: 'Menù sagomati, tableau de mariage, cavalieri tavolo, segnaposto nominali, libretti messa e coni riso.',
+  },
+  {
+    id: 'bomboniere',
+    label: 'Bomboniere & Packaging',
+    badge: 'Scatoline, Tag, Nastri Seta',
+    description: 'Scatoline artigianali, tag personalizzati con nomi e data, nastri in chiffon e allestimento confettata.',
+  },
+  {
+    id: 'sito_wedding',
+    label: 'Sito Wedding & RSVP Online',
+    badge: 'Web, Mobile, Form RSVP',
+    description: 'Piattaforma digitale evento per conferme presenza online, mappa location, programma e lista nozze.',
+  },
+  {
+    id: 'allestimento_grafico',
+    label: 'Segnaletica & Allestimento',
+    badge: 'Welcome Sign, Cartelli A1/A2',
+    description: 'Cartelli di benvenuto rigidi (forex/legno), segnaletica direzionale e pannelli decorativi coordinati.',
+  },
+];
 
 export const STATUS_NAMES: Record<ProjectStatus, string> = {
   new: 'Da avviare',
@@ -243,7 +307,71 @@ export const DEFAULT_PRICE_CATALOG: PriceCatalogItem[] = [
   },
 ];
 
+export const EVENT_PRODUCT_WORKFLOWS: Record<EventProductType, Array<[string, number, number, GateType?]>> = {
+  partecipazioni: [
+    ['Partecipazioni · Brief & Definizione stile suite', 2, 0],
+    ['Partecipazioni · Bozza grafica, font pairing & campionario carte', 5, 4],
+    ['Partecipazioni · Revisione con sposi & Approvazione esecutivo', 1, 2, 'approval'],
+    ['Partecipazioni · Stampa fine art & nobilitazioni a caldo', 4, 7, 'production'],
+    ['Partecipazioni · Taglio sagomato, sigilli ceralacca & imbustamento', 4, 2],
+    ['Partecipazioni · Controllo qualità & Confezione suite', 1, 1],
+  ],
+  coordinati: [
+    ['Coordinati · Raccolta testi definitivi (Menu, Tavoli, Rito)', 1.5, 0],
+    ['Coordinati · Grafica Menu, Tableau de Mariage & Segnaposto', 5, 3],
+    ['Coordinati · Approvazione bozze stampa sposi', 0.5, 1, 'approval'],
+    ['Coordinati · Stampa artigianale & Fustellatura', 4, 5, 'production'],
+    ['Coordinati · Taglio, piegatura libretti rito & cordoncini', 3.5, 2],
+    ['Coordinati · Imballaggio protettivo per trasporto location', 1.5, 1],
+  ],
+  bomboniere: [
+    ['Bomboniere · Scelta formato scatoline, nastri & tag', 1, 0],
+    ['Bomboniere · Grafica e stampa tag nomi e data', 1.5, 2],
+    ['Bomboniere · Assemblaggio scatoline & Confezionamento nastri seta', 5, 4, 'production'],
+    ['Bomboniere · Controllo finale confettata & Packaging', 1.5, 1],
+  ],
+  sito_wedding: [
+    ['Sito Wedding · Raccolta informazioni location, orari & modulo RSVP', 2, 0],
+    ['Sito Wedding · Design interfaccia & palette coordinata partecipazioni', 5, 3],
+    ['Sito Wedding · Configurazione RSVP, countdown & dettagli logistici', 4, 2],
+    ['Sito Wedding · Revisione con sposi & Test su smartphone', 1, 1, 'approval'],
+    ['Sito Wedding · Messa online & Condivisione link con ospiti', 0.5, 0],
+  ],
+  allestimento_grafico: [
+    ['Segnaletica · Rilievo misure & scelta supporto (Legno/Forex/Carta)', 1, 0],
+    ['Segnaletica · Progetto grafico Welcome Sign & Cartelli direzionali', 3, 2],
+    ['Segnaletica · Approvazione file esecutivi di stampa', 0.5, 1, 'approval'],
+    ['Segnaletica · Stampa grande formato & rifilatura pannelli', 3, 5, 'production'],
+    ['Segnaletica · Imballo rinforzato per trasporto evento', 1, 1],
+  ],
+};
+
 export const WORKFLOW_TEMPLATES: Record<ProjectType, Array<[string, number, number, GateType?]>> = {
+  eventi: [
+    ['Brief e conferme evento', 2, 0],
+    ['Concept creativo & Moodboard', 5, 4],
+    ['Bozze grafiche e campionature', 4, 3],
+    ['Approvazione finale sposi', 1, 2, 'approval'],
+    ['Stampa e nobilitazioni artigianali', 6, 8, 'production'],
+    ['Taglio, assemblaggio e finiture', 4, 2],
+    ['Controllo qualità & Packaging sposi', 1.5, 1],
+  ],
+  grafica: [
+    ['Brief approfondito & Analisi brand/progetto', 2, 0],
+    ['Moodboard, palette colori & font pairing', 4, 3],
+    ['Sviluppo 2 proposte grafiche / concept', 6, 4],
+    ['Presentazione bozza & Revisione con cliente', 2, 2, 'approval'],
+    ['Finalizzazione esecutivi & Guida di stile', 4, 2],
+    ['Consegna file digitali alta risoluzione', 1, 0],
+  ],
+  cartoleria: [
+    ['Ricezione specifiche e verifica carte pregiate', 1, 0],
+    ['Verifica tecnica file e abbondanze per stampa', 1.5, 1],
+    ['Stampa di prova / campione finitura', 1.5, 2, 'approval'],
+    ['Produzione: Stampa, nobilitazione & lamina', 6, 6, 'production'],
+    ['Taglio al millimetro, cordonatura & controllo qualità', 4, 2],
+    ['Packaging personalizzato e spedizione protetta', 1.5, 1],
+  ],
   wedding: [
     ['Brief e conferme', 2, 0],
     ['Concept creativo', 6, 5],
@@ -296,11 +424,72 @@ export const WORKFLOW_TEMPLATES: Record<ProjectType, Array<[string, number, numb
 export const generateId = () =>
   Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
 
-export function buildDefaultTasks(type: ProjectType, defaultOwner: TeamMemberName = 'Giulia'): Task[] {
+export function buildDefaultTasks(
+  type: ProjectType,
+  defaultOwner: TeamMemberName = 'Giulia',
+  eventProducts?: EventProductType[]
+): Task[] {
+  // If event or wedding, and specific products were chosen:
+  if ((type === 'eventi' || type === 'wedding') && eventProducts && eventProducts.length > 0) {
+    const tasks: Task[] = [];
+
+    // General initial coordination task
+    tasks.push({
+      id: generateId(),
+      name: 'Coordinamento generale evento & Timeline sposi',
+      owner: 'Giulia',
+      hours: 2,
+      leadDays: 0,
+      gate: '',
+      done: false,
+    });
+
+    for (const prodKey of eventProducts) {
+      const prodSteps = EVENT_PRODUCT_WORKFLOWS[prodKey];
+      if (prodSteps) {
+        prodSteps.forEach(([name, hours, leadDays, gate]) => {
+          const isClaudia =
+            name.toLowerCase().includes('stampa') ||
+            name.toLowerCase().includes('taglio') ||
+            name.toLowerCase().includes('fustellat') ||
+            name.toLowerCase().includes('assemblaggio') ||
+            name.toLowerCase().includes('confezionamento') ||
+            name.toLowerCase().includes('rifilatura');
+          const owner: TeamMemberName = isClaudia ? 'Claudia' : defaultOwner;
+          tasks.push({
+            id: generateId(),
+            name,
+            owner,
+            hours,
+            leadDays,
+            gate: (gate as GateType) || '',
+            done: false,
+          });
+        });
+      }
+    }
+
+    // Final coordination task
+    tasks.push({
+      id: generateId(),
+      name: 'Controllo finale completo & Consegna evento',
+      owner: 'Giulia',
+      hours: 1.5,
+      leadDays: 1,
+      gate: '',
+      done: false,
+    });
+
+    return tasks;
+  }
+
   const steps = WORKFLOW_TEMPLATES[type] || WORKFLOW_TEMPLATES.other;
   return steps.map(([name, hours, leadDays, gate]) => {
-    // Stampa e taglio is Claudia's specialty by default in production
-    const owner: TeamMemberName = (name.includes('taglio') || name.includes('Stampa')) ? 'Claudia' : defaultOwner;
+    const isClaudia =
+      name.toLowerCase().includes('taglio') ||
+      name.toLowerCase().includes('stampa') ||
+      name.toLowerCase().includes('produzione');
+    const owner: TeamMemberName = isClaudia ? 'Claudia' : defaultOwner;
     return {
       id: generateId(),
       name,

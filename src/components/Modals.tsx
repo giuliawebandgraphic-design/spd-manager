@@ -26,12 +26,21 @@ import {
   PriceCatalogItem,
   Task,
   ProjectType,
+  EventProductType,
   ProjectStatus,
   ProjectPriority,
   TeamMemberName,
   GateType,
 } from '../types';
-import { TYPE_NAMES, STATUS_NAMES, MASTER_CATALOG, generateId, generatePortalPassword } from '../lib/constants';
+import {
+  TYPE_NAMES,
+  STATUS_NAMES,
+  MASTER_CATALOG,
+  MAIN_PROJECT_TYPES,
+  EVENT_PRODUCTS_LIST,
+  generateId,
+  generatePortalPassword,
+} from '../lib/constants';
 import { formatMoney, TODAY_ISO, addDays } from '../lib/plannerEngine';
 import { useStudio } from '../context/StudioContext';
 
@@ -51,7 +60,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
   const { clients, createProject, updateProject } = useStudio();
 
   const [name, setName] = useState('');
-  const [type, setType] = useState<ProjectType>('wedding');
+  const [type, setType] = useState<ProjectType>('eventi');
+  const [eventProducts, setEventProducts] = useState<EventProductType[]>(['partecipazioni']);
   const [clientId, setClientId] = useState('');
   const [due, setDue] = useState(addDays(TODAY_ISO(), 28));
   const [eventDate, setEventDate] = useState('');
@@ -64,6 +74,11 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
     if (project) {
       setName(project.name);
       setType(project.type);
+      setEventProducts(
+        project.eventProducts && project.eventProducts.length > 0
+          ? project.eventProducts
+          : (project.type === 'eventi' || project.type === 'wedding' ? ['partecipazioni'] : [])
+      );
       setClientId(project.clientId || '');
       setDue(project.due);
       setEventDate(project.eventDate || '');
@@ -73,7 +88,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
       setNotes(project.notes || '');
     } else {
       setName('');
-      setType('wedding');
+      setType('eventi');
+      setEventProducts(['partecipazioni']);
       setClientId(clients[0]?.id || '');
       setDue(addDays(TODAY_ISO(), 28));
       setEventDate('');
@@ -86,14 +102,31 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
 
   if (!isOpen) return null;
 
+  const isEventType = type === 'eventi' || type === 'wedding';
+
+  const toggleProduct = (prodId: EventProductType) => {
+    if (eventProducts.includes(prodId)) {
+      if (eventProducts.length > 1) {
+        setEventProducts(eventProducts.filter((p) => p !== prodId));
+      }
+    } else {
+      setEventProducts([...eventProducts, prodId]);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+
+    const finalEventProducts = isEventType
+      ? (eventProducts.length > 0 ? eventProducts : ['partecipazioni'])
+      : undefined;
 
     if (project) {
       updateProject(project.id, {
         name: name.trim(),
         type,
+        eventProducts: finalEventProducts,
         clientId,
         due,
         eventDate: eventDate || undefined,
@@ -106,6 +139,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
       createProject({
         name: name.trim(),
         type,
+        eventProducts: finalEventProducts,
         clientId,
         due,
         eventDate: eventDate || undefined,
@@ -123,9 +157,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1a2a20]/40 backdrop-blur-xs">
       <div className="w-full max-w-xl bg-white rounded-2xl shadow-2xl overflow-hidden border border-[#e5e9e3] animate-in fade-in zoom-in-95 duration-150">
         <div className="p-6 border-b border-[#e5e9e3] flex items-center justify-between">
-          <h2 className="font-serif text-2xl font-normal text-[#21362d]">
-            {project ? 'Modifica Progetto' : 'Crea un nuovo progetto'}
-          </h2>
+          <div>
+            <h2 className="font-serif text-2xl font-normal text-[#21362d]">
+              {project ? 'Modifica Progetto' : 'Crea un nuovo progetto'}
+            </h2>
+            <p className="text-xs text-[#78867d] mt-0.5">
+              Definisci tipologia, prodotti in lavorazione e scadenze dello studio.
+            </p>
+          </div>
           <button onClick={onClose} className="p-2 rounded-xl text-[#8a968c] hover:bg-[#edf2eb]">
             <X className="w-5 h-5" />
           </button>
@@ -146,17 +185,24 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-[#263a32] mb-1">Tipologia *</label>
+              <label className="block text-xs font-bold text-[#263a32] mb-1">Tipologia Progetto *</label>
               <select
                 value={type}
-                onChange={(e) => setType(e.target.value as ProjectType)}
-                className="w-full text-xs p-2.5 rounded-xl bg-white border border-[#e5e9e3] focus:border-[#68816e] focus:outline-hidden"
+                onChange={(e) => {
+                  const nextType = e.target.value as ProjectType;
+                  setType(nextType);
+                  if ((nextType === 'eventi' || nextType === 'wedding') && eventProducts.length === 0) {
+                    setEventProducts(['partecipazioni']);
+                  }
+                }}
+                className="w-full text-xs p-2.5 rounded-xl bg-white border border-[#e5e9e3] focus:border-[#68816e] focus:outline-hidden font-medium"
               >
-                {Object.entries(TYPE_NAMES).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
+                <option value="eventi">Eventi & Nozze (Partecipazioni, Suite, ecc.)</option>
+                <option value="grafica">Progetti Grafici & Brand Identity</option>
+                <option value="cartoleria">Cartoleria & Stampe Artigianali</option>
+                {!['eventi', 'grafica', 'cartoleria'].includes(type) && (
+                  <option value={type}>{TYPE_NAMES[type] || type}</option>
+                )}
               </select>
             </div>
 
@@ -175,7 +221,118 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
                 ))}
               </select>
             </div>
+          </div>
 
+          {/* Dedicated Event Products Selector & Workflows */}
+          {isEventType && (
+            <div className="p-4 rounded-2xl bg-[#f5f8f5] border border-[#dce6dc] space-y-3 animate-in fade-in duration-150">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-xs font-bold text-[#244d3b]">
+                    Prodotti Evento Acquistati *
+                  </label>
+                  <p className="text-[11px] text-[#58725f]">
+                    Seleziona cosa sta acquistando il cliente: per ciascun prodotto verrà generato il suo flusso.
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#e3ece2] text-[#244d3b]">
+                  {eventProducts.length} {eventProducts.length === 1 ? 'selezionato' : 'selezionati'}
+                </span>
+              </div>
+
+              {/* Quick Select Dropdown */}
+              <div>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const val = e.target.value as EventProductType;
+                    if (val && !eventProducts.includes(val)) {
+                      setEventProducts([...eventProducts, val]);
+                    }
+                  }}
+                  className="w-full text-xs p-2 rounded-xl bg-white border border-[#dce6dc] text-[#263a32] focus:border-[#68816e] focus:outline-hidden"
+                >
+                  <option value="">+ Aggiungi un prodotto al progetto dal menù...</option>
+                  {EVENT_PRODUCTS_LIST.map((prod) => (
+                    <option
+                      key={prod.id}
+                      value={prod.id}
+                      disabled={eventProducts.includes(prod.id)}
+                    >
+                      {eventProducts.includes(prod.id) ? '✓ ' : '+ '}
+                      {prod.label} ({prod.badge})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Product toggle cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+                {EVENT_PRODUCTS_LIST.map((prod) => {
+                  const isSelected = eventProducts.includes(prod.id);
+                  return (
+                    <button
+                      type="button"
+                      key={prod.id}
+                      onClick={() => toggleProduct(prod.id)}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                        isSelected
+                          ? 'bg-white border-[#244d3b] shadow-2xs ring-1 ring-[#244d3b]'
+                          : 'bg-white/60 border-[#e5e9e3] hover:bg-white text-[#78867d]'
+                      }`}
+                    >
+                      <div
+                        className={`w-4 h-4 rounded-md flex items-center justify-center shrink-0 mt-0.5 border ${
+                          isSelected
+                            ? 'bg-[#244d3b] border-[#244d3b] text-white'
+                            : 'border-[#cbd5cc] bg-white'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold leading-tight text-[#244d3b]">
+                          {prod.label}
+                        </div>
+                        <p className="text-[10px] text-[#78867d] mt-0.5 line-clamp-1">
+                          {prod.badge}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Flow preview summary */}
+              <div className="mt-1 pt-2 border-t border-[#dce6dc] text-[11px] text-[#3e5645]">
+                <div className="flex items-center gap-1.5 font-semibold text-[#244d3b] mb-1">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Flusso di lavoro coordinato generato per:</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-[#dce6dc] text-[10px] font-medium text-[#2d4936]">
+                    Coordinamento generale
+                  </span>
+                  {eventProducts.map((pKey) => {
+                    const item = EVENT_PRODUCTS_LIST.find((i) => i.id === pKey);
+                    return (
+                      <span
+                        key={pKey}
+                        className="px-2 py-0.5 rounded-md bg-[#e7f0e7] border border-[#bcd3be] text-[10px] font-semibold text-[#244d3b]"
+                      >
+                        Fasi {item?.label}
+                      </span>
+                    );
+                  })}
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-[#dce6dc] text-[10px] font-medium text-[#2d4936]">
+                    Controllo e consegna
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-[#263a32] mb-1">
                 Consegna prevista *
@@ -186,13 +343,12 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
                 value={due}
                 onChange={(e) => setDue(e.target.value)}
                 className="w-full text-xs p-2.5 rounded-xl bg-white border border-[#e5e9e3] focus:border-[#68816e] focus:outline-hidden"
-              >
-              </input>
+              />
             </div>
 
             <div>
               <label className="block text-xs font-bold text-[#263a32] mb-1">
-                Data evento (opzionale)
+                Data evento {isEventType ? '(obbligatoria o consigliata)' : '(opzionale)'}
               </label>
               <input
                 type="date"
@@ -257,7 +413,13 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
             <div className="p-3 bg-[#edf2eb] rounded-xl text-xs text-[#375643] flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-[#68816e] shrink-0" />
               <span>
-                Verrà generato automaticamente il workflow specifico con le relative fasi e tempi per la tipologia scelta.
+                {isEventType
+                  ? `Verranno create automaticamente le fasi di lavorazione dedicate per: ${eventProducts
+                      .map((p) => EVENT_PRODUCTS_LIST.find((item) => item.id === p)?.label || p)
+                      .join(', ')}.`
+                  : type === 'grafica'
+                  ? 'Verrà creato il flusso grafico dedicato: Brief, Moodboard & Concept, Proposte grafiche, Revisione ed Esecutivi.'
+                  : 'Verrà creato il flusso cartoleria dedicato: Verifica carte, Abbondanze, Prova stampa, Produzione & Finiture, Packaging.'}
               </span>
             </div>
           )}

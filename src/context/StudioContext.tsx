@@ -519,10 +519,14 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Project Actions
   const createProject = useCallback(
     (data: Omit<Project, 'id' | 'createdAt' | 'updatedAt' | 'tasks'> & { tasks?: Task[] }): Project => {
-      const newTasks = data.tasks && data.tasks.length > 0 ? data.tasks : buildDefaultTasks(data.type, data.owner);
+      const newTasks =
+        data.tasks && data.tasks.length > 0
+          ? data.tasks
+          : buildDefaultTasks(data.type, data.owner, data.eventProducts);
       const newProj: Project = {
         name: data.name.trim(),
         type: data.type,
+        eventProducts: data.eventProducts || undefined,
         clientId: data.clientId || '',
         due: data.due,
         eventDate: data.eventDate || '',

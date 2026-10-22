@@ -33,7 +33,17 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
   const filtered = projects.filter((p) => {
-    if (selectedType !== 'all' && p.type !== selectedType) return false;
+    if (selectedType !== 'all') {
+      if (selectedType === 'eventi') {
+        if (p.type !== 'eventi' && p.type !== 'wedding') return false;
+      } else if (selectedType === 'grafica') {
+        if (p.type !== 'grafica' && p.type !== 'design' && p.type !== 'website') return false;
+      } else if (selectedType === 'cartoleria') {
+        if (p.type !== 'cartoleria' && p.type !== 'b2b' && p.type !== 'retail') return false;
+      } else if (p.type !== selectedType) {
+        return false;
+      }
+    }
     if (selectedStatus !== 'all' && p.status !== selectedStatus) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -57,14 +67,12 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value)}
-              className="text-xs py-2 px-3 rounded-xl border border-[#e5e9e3] bg-[#fafbf9] text-[#263a32] focus:outline-hidden"
+              className="text-xs py-2 px-3 rounded-xl border border-[#e5e9e3] bg-[#fafbf9] text-[#263a32] focus:outline-hidden font-medium"
             >
               <option value="all">Tutte le tipologie</option>
-              {Object.entries(TYPE_NAMES).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
+              <option value="eventi">Eventi & Nozze</option>
+              <option value="grafica">Progetti Grafici</option>
+              <option value="cartoleria">Cartoleria & Stampe</option>
             </select>
           </div>
 
