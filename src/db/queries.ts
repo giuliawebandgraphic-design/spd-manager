@@ -111,49 +111,96 @@ export async function getAllStudioData() {
 // Project queries
 export async function createProjectRecord(project: any, tasksList: any[] = []) {
   try {
-    await db.insert(schema.projects).values({
+    const existing = await db
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, project.id))
+      .limit(1);
+
+    const projectValues = {
       id: project.id,
-      clientId: project.clientId || null,
-      name: project.name,
-      type: project.type,
-      status: project.status,
-      priority: project.priority,
-      owner: project.owner,
-      due: project.due,
-      eventDate: project.eventDate || null,
+      clientId: (project.clientId && String(project.clientId).trim() !== '') ? project.clientId : null,
+      name: project.name || 'Senza Titolo',
+      type: project.type || 'wedding',
+      status: project.status || 'new',
+      priority: project.priority || 'normal',
+      owner: project.owner || 'Giulia',
+      due: project.due || new Date().toISOString().slice(0, 10),
+      eventDate: (project.eventDate && String(project.eventDate).trim() !== '') ? project.eventDate : null,
       notes: project.notes || '',
       approved: Boolean(project.approved),
       approvedAt: project.approvedAt || null,
       approvedBy: project.approvedBy || null,
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-    });
+      createdAt: project.createdAt || new Date().toISOString().slice(0, 10),
+      updatedAt: project.updatedAt || new Date().toISOString().slice(0, 10),
+    };
 
-    if (tasksList.length > 0) {
-      await db.insert(schema.tasks).values(
-        tasksList.map((t, idx) => ({
+    if (existing.length > 0) {
+      await db.update(schema.projects).set(projectValues).where(eq(schema.projects.id, project.id));
+    } else {
+      await db.insert(schema.projects).values(projectValues);
+    }
+
+    if (tasksList && tasksList.length > 0) {
+      for (let idx = 0; idx < tasksList.length; idx++) {
+        const t = tasksList[idx];
+        if (!t.id) continue;
+        const taskValues = {
           id: t.id,
           projectId: project.id,
-          name: t.name,
-          owner: t.owner,
-          hours: String(t.hours),
+          name: t.name || 'Fase di lavorazione',
+          owner: t.owner || 'Giulia',
+          hours: String(Number(t.hours) || 1),
           leadDays: Number(t.leadDays) || 0,
           gate: t.gate || '',
           done: Boolean(t.done),
           doneAt: t.doneAt || null,
-          sortOrder: idx,
-        }))
-      );
+          sortOrder: Number(t.sortOrder ?? idx) || idx,
+        };
+
+        const existingTask = await db
+          .select({ id: schema.tasks.id })
+          .from(schema.tasks)
+          .where(eq(schema.tasks.id, t.id))
+          .limit(1);
+
+        if (existingTask.length > 0) {
+          await db.update(schema.tasks).set(taskValues).where(eq(schema.tasks.id, t.id));
+        } else {
+          await db.insert(schema.tasks).values(taskValues);
+        }
+      }
     }
   } catch (error) {
-    console.error('Failed to create project in Cloud SQL:', error);
+    console.error('Failed to create/upsert project in Cloud SQL:', error);
     throw error;
   }
 }
 
 export async function updateProjectRecord(id: string, updates: any) {
   try {
-    await db.update(schema.projects).set(updates).where(eq(schema.projects.id, id));
+    const sanitized: any = {};
+    if (updates.name !== undefined) sanitized.name = updates.name;
+    if (updates.clientId !== undefined) {
+      sanitized.clientId = (updates.clientId && String(updates.clientId).trim() !== '') ? updates.clientId : null;
+    }
+    if (updates.type !== undefined) sanitized.type = updates.type;
+    if (updates.status !== undefined) sanitized.status = updates.status;
+    if (updates.priority !== undefined) sanitized.priority = updates.priority;
+    if (updates.owner !== undefined) sanitized.owner = updates.owner;
+    if (updates.due !== undefined) sanitized.due = updates.due;
+    if (updates.eventDate !== undefined) {
+      sanitized.eventDate = (updates.eventDate && String(updates.eventDate).trim() !== '') ? updates.eventDate : null;
+    }
+    if (updates.notes !== undefined) sanitized.notes = updates.notes || '';
+    if (updates.approved !== undefined) sanitized.approved = Boolean(updates.approved);
+    if (updates.approvedAt !== undefined) sanitized.approvedAt = updates.approvedAt || null;
+    if (updates.approvedBy !== undefined) sanitized.approvedBy = updates.approvedBy || null;
+    if (updates.updatedAt !== undefined) sanitized.updatedAt = updates.updatedAt;
+
+    if (Object.keys(sanitized).length > 0) {
+      await db.update(schema.projects).set(sanitized).where(eq(schema.projects.id, id));
+    }
   } catch (error) {
     console.error('Failed to update project in Cloud SQL:', error);
     throw error;
@@ -261,19 +308,25 @@ export async function insertFeedbackRecord(feedback: any) {
 // Client queries
 export async function insertClientRecord(client: any) {
   try {
-    await db.insert(schema.clients).values({
+    const existing = await db
+      .select({ id: schema.clients.id })
+      .from(schema.clients)
+      .where(eq(schema.clients.id, client.id))
+      .limit(1);
+
+    const clientValues = {
       id: client.id,
-      name: client.name,
+      name: client.name || 'Cliente Senza Nome',
       email: client.email || '',
       phone: client.phone || '',
       type: client.type || 'Privato',
       companyName: client.companyName || null,
       taxId: client.taxId || null,
       notes: client.notes || '',
-      portalToken: client.portalToken,
+      portalToken: client.portalToken || ('portal_' + Math.random().toString(36).slice(2, 8)),
       portalPassword: client.portalPassword || null,
-      portalEnabled: Boolean(client.portalEnabled),
-      createdAt: client.createdAt,
+      portalEnabled: Boolean(client.portalEnabled ?? true),
+      createdAt: client.createdAt || new Date().toISOString().slice(0, 10),
       fiscalType: client.fiscalType || null,
       fiscalCode: client.fiscalCode || null,
       vatNumber: client.vatNumber || null,
@@ -288,19 +341,39 @@ export async function insertClientRecord(client: any) {
       billingNotes: client.billingNotes || null,
       fiscalDataCompleted: Boolean(client.fiscalDataCompleted),
       fiscalDataUpdatedAt: client.fiscalDataUpdatedAt || null,
-    });
+    };
+
+    if (existing.length > 0) {
+      await db.update(schema.clients).set(clientValues).where(eq(schema.clients.id, client.id));
+    } else {
+      await db.insert(schema.clients).values(clientValues);
+    }
   } catch (error) {
-    console.error('Failed to insert client in Cloud SQL:', error);
+    console.error('Failed to insert/upsert client in Cloud SQL:', error);
     throw error;
   }
 }
 
 export async function updateClientRecord(id: string, updates: any) {
   try {
-    await db.update(schema.clients).set(updates).where(eq(schema.clients.id, id));
+    const validKeys = [
+      'name', 'email', 'phone', 'type', 'companyName', 'taxId', 'notes',
+      'portalToken', 'portalPassword', 'portalEnabled', 'fiscalType', 'fiscalCode',
+      'vatNumber', 'companyLegalName', 'sdiCode', 'pec', 'billingAddress',
+      'billingCap', 'billingCity', 'billingProvince', 'billingCountry', 'billingNotes',
+      'fiscalDataCompleted', 'fiscalDataUpdatedAt'
+    ];
+    const sanitized: any = {};
+    for (const k of validKeys) {
+      if (updates[k] !== undefined) {
+        sanitized[k] = updates[k];
+      }
+    }
+    if (Object.keys(sanitized).length > 0) {
+      await db.update(schema.clients).set(sanitized).where(eq(schema.clients.id, id));
+    }
   } catch (error) {
     console.error('Failed to update client in Cloud SQL:', error);
-    // Don't throw so local operations continue reliably
   }
 }
 
@@ -316,23 +389,36 @@ export async function deleteClientRecord(id: string) {
 // Quote queries
 export async function insertQuoteRecord(quote: any, itemsList: any[] = []) {
   try {
-    await db.insert(schema.quotes).values({
+    const existing = await db
+      .select({ id: schema.quotes.id })
+      .from(schema.quotes)
+      .where(eq(schema.quotes.id, quote.id))
+      .limit(1);
+
+    const quoteValues = {
       id: quote.id,
-      clientId: quote.clientId || null,
-      projectId: quote.projectId || null,
-      name: quote.name,
+      clientId: (quote.clientId && String(quote.clientId).trim() !== '') ? quote.clientId : null,
+      projectId: (quote.projectId && String(quote.projectId).trim() !== '') ? quote.projectId : null,
+      name: quote.name || 'Preventivo',
       status: quote.status || 'draft',
       discount: String(quote.discount || 0),
       vatRate: String(quote.vatRate || 22),
       depositPercent: String(quote.depositPercent || 40),
       notes: quote.notes || '',
-      created: quote.created,
-    });
+      created: quote.created || new Date().toISOString().slice(0, 10),
+    };
 
-    if (itemsList.length > 0) {
+    if (existing.length > 0) {
+      await db.update(schema.quotes).set(quoteValues).where(eq(schema.quotes.id, quote.id));
+    } else {
+      await db.insert(schema.quotes).values(quoteValues);
+    }
+
+    if (itemsList && itemsList.length > 0) {
+      await db.delete(schema.quoteItems).where(eq(schema.quoteItems.quoteId, quote.id));
       await db.insert(schema.quoteItems).values(
         itemsList.map((it, idx) => ({
-          id: it.id,
+          id: it.id || ('qi_' + Math.random().toString(36).slice(2, 8)),
           quoteId: quote.id,
           name: it.name,
           qty: String(it.qty || 1),
@@ -350,18 +436,27 @@ export async function insertQuoteRecord(quote: any, itemsList: any[] = []) {
 export async function updateQuoteRecord(id: string, updates: any, itemsList?: any[]) {
   try {
     const formatted: any = { ...updates };
+    delete formatted.items; // Strip nested items array before updating quotes table
+    if (formatted.clientId !== undefined) {
+      formatted.clientId = (formatted.clientId && String(formatted.clientId).trim() !== '') ? formatted.clientId : null;
+    }
+    if (formatted.projectId !== undefined) {
+      formatted.projectId = (formatted.projectId && String(formatted.projectId).trim() !== '') ? formatted.projectId : null;
+    }
     if (formatted.discount !== undefined) formatted.discount = String(formatted.discount);
     if (formatted.vatRate !== undefined) formatted.vatRate = String(formatted.vatRate);
     if (formatted.depositPercent !== undefined) formatted.depositPercent = String(formatted.depositPercent);
 
-    await db.update(schema.quotes).set(formatted).where(eq(schema.quotes.id, id));
+    if (Object.keys(formatted).length > 0) {
+      await db.update(schema.quotes).set(formatted).where(eq(schema.quotes.id, id));
+    }
 
     if (itemsList) {
       await db.delete(schema.quoteItems).where(eq(schema.quoteItems.quoteId, id));
       if (itemsList.length > 0) {
         await db.insert(schema.quoteItems).values(
           itemsList.map((it, idx) => ({
-            id: it.id,
+            id: it.id || ('qi_' + Math.random().toString(36).slice(2, 8)),
             quoteId: id,
             name: it.name,
             qty: String(it.qty || 1),

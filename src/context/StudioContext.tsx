@@ -129,15 +129,54 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isSyncing, setIsSyncing] = useState<boolean>(true);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
-  // Load from backend Cloud SQL API
+  // Load from backend Cloud SQL API and set up background live synchronization
   useEffect(() => {
-    async function loadData() {
-      setIsSyncing(true);
+    let isMounted = true;
+
+    async function loadData(silent = false) {
+      if (!silent) setIsSyncing(true);
       try {
         const res = await fetch('/api/studio/data');
         if (res.ok) {
-          const data = await res.json();
+          let data = await res.json();
           if (data && Array.isArray(data.projects)) {
+            // Check if local storage has any projects or clients not yet in Cloud SQL
+            try {
+              const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+              if (stored) {
+                const parsed = JSON.parse(stored);
+                const dbProjectIds = new Set(data.projects.map((p: Project) => p.id));
+                const dbClientIds = new Set((data.clients || []).map((c: Client) => c.id));
+
+                const missingProjects = Array.isArray(parsed.projects)
+                  ? parsed.projects.filter((p: Project) => p && p.id && !dbProjectIds.has(p.id))
+                  : [];
+                const missingClients = Array.isArray(parsed.clients)
+                  ? parsed.clients.filter((c: Client) => c && c.id && !dbClientIds.has(c.id))
+                  : [];
+
+                if (missingProjects.length > 0 || missingClients.length > 0) {
+                  const pushRes = await fetch('/api/studio/sync-push', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      projects: missingProjects,
+                      clients: missingClients,
+                    }),
+                  });
+                  if (pushRes.ok) {
+                    const pushResult = await pushRes.json();
+                    if (pushResult.data && Array.isArray(pushResult.data.projects)) {
+                      data = pushResult.data;
+                    }
+                  }
+                }
+              }
+            } catch (syncErr) {
+              console.warn('Initial sync-push check error:', syncErr);
+            }
+
+            if (!isMounted) return;
             setProjects(data.projects);
             setClients(data.clients || []);
             setQuotes(data.quotes || []);
@@ -163,12 +202,12 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.warn('API error, falling back to local persistent store:', err);
       }
 
-      // Local storage fallback
+      // Local storage fallback if API unreachable
       try {
         const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (parsed && Array.isArray(parsed.projects)) {
+          if (parsed && Array.isArray(parsed.projects) && isMounted) {
             setProjects(parsed.projects);
             setClients(parsed.clients || []);
             setQuotes(parsed.quotes || []);
@@ -190,11 +229,37 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.error('Local fallback read error:', e);
       }
 
-      setDbStatus('local_fallback');
-      setIsSyncing(false);
+      if (isMounted) {
+        setDbStatus('local_fallback');
+        setIsSyncing(false);
+      }
     }
 
+    // Initial load
     loadData();
+
+    // Auto-sync polling every 6 seconds so Incognito, other tabs & devices always stay updated
+    const syncInterval = setInterval(() => {
+      loadData(true);
+    }, 6000);
+
+    // Sync on window focus or tab visibility change
+    const handleFocus = () => {
+      loadData(true);
+    };
+
+    window.addEventListener('focus', handleFocus);
+    const handleVisibility = () => {
+      if (!document.hidden) loadData(true);
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      isMounted = false;
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   // Persist state updates to local cache
@@ -258,9 +323,12 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project: newProj, tasks: newTasks }),
-      }).then(() => {
-        setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
-      }).catch((e) => console.error('Cloud SQL sync error:', e));
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
+        })
+        .catch((e) => console.error('Cloud SQL sync error:', e));
 
       return newProj;
     },
@@ -280,14 +348,20 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setProjects(updated);
       persistLocalCache(updated);
 
+      const sanitizedUpdates = { ...updates };
+      if (sanitizedUpdates.clientId === '') delete (sanitizedUpdates as any).clientId;
+
       // Async write to Cloud SQL backend
       fetch(`/api/projects/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      }).then(() => {
-        setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
-      }).catch((e) => console.error('Cloud SQL sync error:', e));
+        body: JSON.stringify(sanitizedUpdates),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
+        })
+        .catch((e) => console.error('Cloud SQL sync error:', e));
     },
     [projects, persistLocalCache]
   );

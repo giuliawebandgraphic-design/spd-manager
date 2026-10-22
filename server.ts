@@ -26,6 +26,43 @@ app.get('/api/studio/data', async (_req, res) => {
   }
 });
 
+// 1b. Batch sync push: persist local or offline projects & clients into Cloud SQL
+app.post('/api/studio/sync-push', async (req, res) => {
+  try {
+    const { projects: localProjects, clients: localClients } = req.body;
+    let syncedProjects = 0;
+    let syncedClients = 0;
+
+    if (Array.isArray(localClients)) {
+      for (const client of localClients) {
+        try {
+          await queries.insertClientRecord(client);
+          syncedClients++;
+        } catch (e) {
+          console.warn('Sync push client warning:', e);
+        }
+      }
+    }
+
+    if (Array.isArray(localProjects)) {
+      for (const proj of localProjects) {
+        try {
+          await queries.createProjectRecord(proj, proj.tasks || []);
+          syncedProjects++;
+        } catch (e) {
+          console.warn('Sync push project warning:', e);
+        }
+      }
+    }
+
+    const freshData = await queries.getAllStudioData();
+    res.json({ success: true, syncedProjects, syncedClients, data: freshData });
+  } catch (err: any) {
+    console.error('API POST /api/studio/sync-push error:', err);
+    res.status(500).json({ error: 'Failed to sync local data to Cloud SQL' });
+  }
+});
+
 // 2. Projects
 app.post('/api/projects', async (req, res) => {
   try {

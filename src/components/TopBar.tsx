@@ -88,25 +88,27 @@ export const TopBar: React.FC<TopBarProps> = ({
 
           {/* Database Live Status Badge & Refresh */}
           <div
-            className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[#e5e9e3] text-xs text-[#3d5243] shadow-2xs"
-            title="Database Cloud SQL (PostgreSQL) - i dati sono salvati permanentemente"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-[#e5e9e3] text-xs text-[#3d5243] shadow-2xs shrink-0"
+            title="Database Cloud SQL (PostgreSQL) - Sincronizzato costantemente tra tutti i browser e computer"
           >
             <span
-              className={`w-2 h-2 rounded-full ${
+              className={`w-2 h-2 rounded-full shrink-0 ${
                 dbStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
               }`}
             />
-            <span className="font-semibold text-[11px] text-[#244d3b]">Database</span>
-            <span className="text-[10px] text-[#78867d]">
-              {isSyncing ? 'Sincronizzazione...' : lastSyncedAt ? `Sync ${lastSyncedAt}` : 'Connesso'}
+            <span className="font-semibold text-[11px] text-[#244d3b] hidden xs:inline sm:inline">
+              Cloud SQL
+            </span>
+            <span className="text-[10px] text-[#78867d] hidden sm:inline">
+              {isSyncing ? 'Sync...' : lastSyncedAt ? `Sync ${lastSyncedAt}` : 'Live'}
             </span>
             <button
               onClick={() => refreshFromDatabase()}
               disabled={isSyncing}
-              className="p-1 hover:bg-[#edf2eb] text-[#244d3b] rounded-lg transition-colors ml-0.5"
-              title="Aggiorna e consulta il database adesso"
+              className="p-1 hover:bg-[#edf2eb] text-[#244d3b] rounded-lg transition-colors cursor-pointer"
+              title="Aggiorna e risincronizza con Cloud SQL adesso"
             >
-              <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
             </button>
           </div>
 
