@@ -29,7 +29,7 @@ import { SettingsView } from './views/SettingsView';
 import { ShieldCheck } from 'lucide-react';
 
 const StudioAppContent: React.FC = () => {
-  const { projects, clients } = useStudio();
+  const { projects, clients, toastMessage } = useStudio();
 
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
@@ -422,6 +422,14 @@ const StudioAppContent: React.FC = () => {
         }}
         record={editingFinancialRecord}
       />
+
+      {/* Real-time Cloud Sync Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 bg-[#1e3f30] text-white text-xs font-semibold rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200 border border-emerald-500/30">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 };
