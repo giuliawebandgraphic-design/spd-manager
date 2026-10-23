@@ -19,6 +19,7 @@ import {
 import { SUPABASE_SQL_SCHEMA } from '../db/schemaSql';
 import { useStudio } from '../context/StudioContext';
 import { downloadICalendarFile } from '../lib/googleCalendar';
+import firebaseConfig from '../../firebase-applet-config.json';
 
 export const SettingsView: React.FC = () => {
   const {
@@ -60,7 +61,7 @@ export const SettingsView: React.FC = () => {
 
   // Google Calendar state
   const [googleClientId, setGoogleClientId] = useState(
-    import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+    import.meta.env.VITE_GOOGLE_CLIENT_ID || (firebaseConfig as any)?.oAuthClientId || ''
   );
 
   // Backup import
