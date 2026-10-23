@@ -259,141 +259,11 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, []);
 
-  // Setup bidirectional real-time synchronization with Firestore Cloud DB
+  // Load authoritative studio data from Cloud SQL backend on mount
   useEffect(() => {
-    let unsubscribeFirestore: (() => void) | undefined;
     let isMounted = true;
 
-    try {
-      const mainDocRef = doc(firestoreDb, 'studio_data', 'main');
-
-      unsubscribeFirestore = onSnapshot(
-        mainDocRef,
-        (snapshot) => {
-          if (!isMounted) return;
-          if (snapshot.exists()) {
-            const data = snapshot.data();
-            if (data) {
-              let shouldPushBack = false;
-
-              // 1. Projects: merge server data with any non-deleted local pending creations
-              if (Array.isArray(data.projects)) {
-                const serverProjects: Project[] = data.projects;
-                const serverIds = new Set(serverProjects.map((p) => p.id));
-                const localOnly = projectsRef.current.filter(
-                  (lp) => !serverIds.has(lp.id) && !deletedProjectIdsRef.current.has(lp.id)
-                );
-                if (localOnly.length > 0) {
-                  shouldPushBack = true;
-                }
-                const merged = [
-                  ...localOnly,
-                  ...serverProjects.filter((p) => !deletedProjectIdsRef.current.has(p.id)),
-                ];
-                setProjects(merged);
-                projectsRef.current = merged;
-              }
-
-              // 2. Clients: merge server data with any non-deleted local pending creations
-              if (Array.isArray(data.clients)) {
-                const serverClients: Client[] = data.clients;
-                const serverIds = new Set(serverClients.map((c) => c.id));
-                const localOnly = clientsRef.current.filter(
-                  (lc) => !serverIds.has(lc.id) && !deletedClientIdsRef.current.has(lc.id)
-                );
-                if (localOnly.length > 0) {
-                  shouldPushBack = true;
-                }
-                const merged = [
-                  ...localOnly,
-                  ...serverClients.filter((c) => !deletedClientIdsRef.current.has(c.id)),
-                ];
-                setClients(merged);
-                clientsRef.current = merged;
-              }
-
-              // 3. Quotes: merge server data with any non-deleted local pending creations
-              if (Array.isArray(data.quotes)) {
-                const serverQuotes: Quote[] = data.quotes;
-                const serverIds = new Set(serverQuotes.map((q) => q.id));
-                const localOnly = quotesRef.current.filter(
-                  (lq) => !serverIds.has(lq.id) && !deletedQuoteIdsRef.current.has(lq.id)
-                );
-                if (localOnly.length > 0) {
-                  shouldPushBack = true;
-                }
-                const merged = [
-                  ...localOnly,
-                  ...serverQuotes.filter((q) => !deletedQuoteIdsRef.current.has(q.id)),
-                ];
-                setQuotes(merged);
-                quotesRef.current = merged;
-              }
-
-              // 4. Inventory
-              if (Array.isArray(data.inventory)) {
-                setInventory(data.inventory);
-                inventoryRef.current = data.inventory;
-              }
-
-              // 5. Price Catalog
-              if (Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
-                setPriceCatalog(data.priceCatalog);
-                priceCatalogRef.current = data.priceCatalog;
-              }
-
-              // 6. Financials
-              if (Array.isArray(data.financials) && data.financials.length > 0) {
-                setFinancials(data.financials);
-                financialsRef.current = data.financials;
-              }
-
-              // 7. Settings
-              if (data.settings) {
-                setSettings(data.settings);
-                settingsRef.current = data.settings;
-              }
-
-              setDbStatus('connected');
-              setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
-              setIsSyncing(false);
-
-              persistLocalCache(
-                projectsRef.current,
-                clientsRef.current,
-                quotesRef.current,
-                inventoryRef.current,
-                priceCatalogRef.current,
-                settingsRef.current,
-                undefined,
-                financialsRef.current
-              );
-
-              // If client had local items that were not yet on the server, upload immediately
-              if (shouldPushBack) {
-                syncToCloud({
-                  projects: projectsRef.current,
-                  clients: clientsRef.current,
-                  quotes: quotesRef.current,
-                });
-              }
-            }
-          } else {
-            fallbackLoad();
-          }
-        },
-        (error) => {
-          console.warn('Firestore real-time sync info:', error);
-          if (isMounted) fallbackLoad();
-        }
-      );
-    } catch (e) {
-      console.warn('Firestore initialization info:', e);
-      fallbackLoad();
-    }
-
-    async function fallbackLoad() {
-      if (!isMounted) return;
+    async function loadStudioData() {
       setIsSyncing(true);
       try {
         const res = await fetch('/api/studio/data');
@@ -401,44 +271,76 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const data = await res.json();
           if (data && Array.isArray(data.projects)) {
             if (!isMounted) return;
+
+            // Cloud SQL is the Single Source of Truth
             setProjects(data.projects);
             projectsRef.current = data.projects;
+
             setClients(data.clients || []);
             clientsRef.current = data.clients || [];
+
             setQuotes(data.quotes || []);
             quotesRef.current = data.quotes || [];
+
             setInventory(data.inventory || []);
             inventoryRef.current = data.inventory || [];
-            if (data.priceCatalog?.length) {
+
+            if (Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
               setPriceCatalog(data.priceCatalog);
               priceCatalogRef.current = data.priceCatalog;
             }
-            if (data.financials?.length) {
+
+            if (Array.isArray(data.financials) && data.financials.length > 0) {
               setFinancials(data.financials);
               financialsRef.current = data.financials;
             }
+
             if (data.settings) {
               setSettings(data.settings);
               settingsRef.current = data.settings;
             }
+
             setDbStatus('connected');
             setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
             setIsSyncing(false);
 
+            // Persist the clean, authoritative server state to local cache
+            try {
+              localStorage.setItem(
+                LOCAL_STORAGE_KEY,
+                JSON.stringify({
+                  projects: data.projects,
+                  clients: data.clients || [],
+                  quotes: data.quotes || [],
+                  inventory: data.inventory || [],
+                  priceCatalog: data.priceCatalog || [],
+                  settings: data.settings || DEFAULT_SETTINGS,
+                  teamMembers: DEFAULT_TEAM,
+                  financials: data.financials || [],
+                  updatedAt: new Date().toISOString(),
+                })
+              );
+            } catch (err) {}
+
+            // Keep Firestore synchronized with the authoritative Cloud SQL state
             try {
               const clean = JSON.parse(JSON.stringify({ ...data, updatedAt: new Date().toISOString() }));
-              await setDoc(doc(firestoreDb, 'studio_data', 'main'), clean, { merge: true });
+              await setDoc(doc(firestoreDb, 'studio_data', 'main'), clean, { merge: false });
             } catch (err) {}
+
             return;
           }
         }
-      } catch (err) {}
+      } catch (err) {
+        console.warn('Could not load from Cloud SQL, using local cache fallback:', err);
+      }
 
+      // Offline / fallback from local cache
       try {
         const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (stored) {
+        if (stored && isMounted) {
           const parsed = JSON.parse(stored);
-          if (parsed && Array.isArray(parsed.projects) && isMounted) {
+          if (parsed && Array.isArray(parsed.projects)) {
             setProjects(parsed.projects);
             projectsRef.current = parsed.projects;
             setClients(parsed.clients || []);
@@ -459,11 +361,6 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               setSettings(parsed.settings);
               settingsRef.current = parsed.settings;
             }
-            setDbStatus('connected');
-            try {
-              const clean = JSON.parse(JSON.stringify({ ...parsed, updatedAt: new Date().toISOString() }));
-              await setDoc(doc(firestoreDb, 'studio_data', 'main'), clean, { merge: true });
-            } catch (err) {}
           }
         }
       } catch (e) {}
@@ -471,36 +368,37 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (isMounted) setIsSyncing(false);
     }
 
+    loadStudioData();
+
     return () => {
       isMounted = false;
-      if (unsubscribeFirestore) unsubscribeFirestore();
     };
   }, []);
 
   // Persist state updates to local cache
   const persistLocalCache = useCallback(
     (
-      newProjects = projects,
-      newClients = clients,
-      newQuotes = quotes,
-      newInventory = inventory,
-      newPriceCatalog = priceCatalog,
-      newSettings = settings,
-      newTeam = teamMembers,
-      newFinancials = financials
+      newProjects?: Project[],
+      newClients?: Client[],
+      newQuotes?: Quote[],
+      newInventory?: InventoryItem[],
+      newPriceCatalog?: PriceCatalogItem[],
+      newSettings?: StudioSettings,
+      newTeam?: TeamMember[],
+      newFinancials?: FinancialRecord[]
     ) => {
       try {
         localStorage.setItem(
           LOCAL_STORAGE_KEY,
           JSON.stringify({
-            projects: newProjects,
-            clients: newClients,
-            quotes: newQuotes,
-            inventory: newInventory,
-            priceCatalog: newPriceCatalog,
-            settings: newSettings,
-            teamMembers: newTeam,
-            financials: newFinancials,
+            projects: newProjects ?? projectsRef.current,
+            clients: newClients ?? clientsRef.current,
+            quotes: newQuotes ?? quotesRef.current,
+            inventory: newInventory ?? inventoryRef.current,
+            priceCatalog: newPriceCatalog ?? priceCatalogRef.current,
+            settings: newSettings ?? settingsRef.current,
+            teamMembers: newTeam ?? teamMembersRef.current,
+            financials: newFinancials ?? financialsRef.current,
             updatedAt: new Date().toISOString(),
           })
         );
@@ -508,7 +406,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.error('LocalStorage write error:', e);
       }
     },
-    [projects, clients, quotes, inventory, priceCatalog, settings, teamMembers, financials]
+    []
   );
 
   // Compute backward plans automatically
@@ -604,18 +502,26 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const deleteProject = useCallback(
-    (id: string) => {
+    async (id: string) => {
       deletedProjectIdsRef.current.add(id);
       const updated = projectsRef.current.filter((p) => p.id !== id);
       projectsRef.current = updated;
       setProjects(updated);
       persistLocalCache(updated);
-      syncToCloud({ projects: updated });
-      showToast('Progetto rimosso');
+      showToast('Progetto rimosso definitivamente');
 
-      fetch(`/api/projects/${id}`, { method: 'DELETE' })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.warn('Cloud SQL delete notice:', e));
+      try {
+        const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
+        }
+      } catch (e) {
+        console.warn('Cloud SQL delete notice:', e);
+      }
+
+      try {
+        syncToCloud({ projects: updated });
+      } catch (e) {}
     },
     [persistLocalCache, syncToCloud, showToast]
   );
@@ -1250,59 +1156,68 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const refreshFromDatabase = useCallback(async (): Promise<boolean> => {
     setIsSyncing(true);
     try {
-      // 1. Try Firestore direct first (works across all browsers and devices)
-      const snap = await getDoc(doc(firestoreDb, 'studio_data', 'main'));
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data) {
-          if (Array.isArray(data.projects)) setProjects(data.projects);
-          if (Array.isArray(data.clients)) setClients(data.clients);
-          if (Array.isArray(data.quotes)) setQuotes(data.quotes);
-          if (Array.isArray(data.inventory)) setInventory(data.inventory);
-          if (Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
-            setPriceCatalog(data.priceCatalog);
-          }
-          if (Array.isArray(data.financials) && data.financials.length > 0) {
-            setFinancials(data.financials);
-          }
-          if (data.settings) setSettings(data.settings);
-          setDbStatus('connected');
-          const time = new Date().toLocaleTimeString('it-IT');
-          setLastSyncedAt(time);
-          setIsSyncing(false);
-          return true;
-        }
-      }
-    } catch (e) {
-      console.warn('Firestore direct refresh error, trying backend:', e);
-    }
-
-    try {
+      // 1. Fetch directly from Cloud SQL backend (Primary Relational Database)
       const res = await fetch('/api/studio/data');
       if (res.ok) {
         const data = await res.json();
         if (data && Array.isArray(data.projects)) {
           setProjects(data.projects);
+          projectsRef.current = data.projects;
+
           setClients(data.clients || []);
+          clientsRef.current = data.clients || [];
+
           setQuotes(data.quotes || []);
+          quotesRef.current = data.quotes || [];
+
           setInventory(data.inventory || []);
+          inventoryRef.current = data.inventory || [];
+
           if (data.priceCatalog && Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
             setPriceCatalog(data.priceCatalog);
+            priceCatalogRef.current = data.priceCatalog;
           }
+
           if (data.financials && Array.isArray(data.financials) && data.financials.length > 0) {
             setFinancials(data.financials);
+            financialsRef.current = data.financials;
           }
-          if (data.settings) setSettings(data.settings);
+
+          if (data.settings) {
+            setSettings(data.settings);
+            settingsRef.current = data.settings;
+          }
+
           setDbStatus('connected');
           const time = new Date().toLocaleTimeString('it-IT');
           setLastSyncedAt(time);
           setIsSyncing(false);
+
+          // Update local cache
+          try {
+            localStorage.setItem(
+              LOCAL_STORAGE_KEY,
+              JSON.stringify({
+                projects: data.projects,
+                clients: data.clients || [],
+                quotes: data.quotes || [],
+                inventory: data.inventory || [],
+                priceCatalog: data.priceCatalog || [],
+                settings: data.settings || DEFAULT_SETTINGS,
+                teamMembers: DEFAULT_TEAM,
+                financials: data.financials || [],
+                updatedAt: new Date().toISOString(),
+              })
+            );
+          } catch (err) {}
+
           return true;
         }
       }
     } catch (e) {
       console.error('Failed to refresh data from Cloud SQL backend:', e);
     }
+
     setIsSyncing(false);
     return false;
   }, []);
