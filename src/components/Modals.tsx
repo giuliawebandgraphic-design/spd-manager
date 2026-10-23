@@ -118,8 +118,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
     e.preventDefault();
     if (!name.trim()) return;
 
-    const finalEventProducts = isEventType
-      ? (eventProducts.length > 0 ? eventProducts : ['partecipazioni'])
+    const finalEventProducts: EventProductType[] | undefined = isEventType
+      ? (eventProducts.length > 0 ? eventProducts : (['partecipazioni'] as EventProductType[]))
       : undefined;
 
     if (project) {

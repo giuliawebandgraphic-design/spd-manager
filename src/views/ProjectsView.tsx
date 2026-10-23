@@ -12,7 +12,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { Project, ProjectType, ProjectStatus } from '../types';
-import { TYPE_NAMES, STATUS_NAMES, STATUS_TAGS } from '../lib/constants';
+import { TYPE_NAMES, STATUS_NAMES, STATUS_TAGS, EVENT_PRODUCTS_LIST } from '../lib/constants';
 import { formatDateIt } from '../lib/plannerEngine';
 import { useStudio } from '../context/StudioContext';
 
@@ -187,6 +187,23 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                       </span>
                     )}
                   </div>
+
+                  {/* Event Products Chips */}
+                  {p.eventProducts && p.eventProducts.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-3">
+                      {p.eventProducts.map((prodId) => {
+                        const meta = EVENT_PRODUCTS_LIST.find((ep) => ep.id === prodId);
+                        return (
+                          <span
+                            key={prodId}
+                            className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-[#f2f6f1] text-[#244d3b] border border-[#d8e3d6]"
+                          >
+                            {meta ? meta.label.split(' ')[0] : prodId}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-5 pt-4 border-t border-[#eef2ec] space-y-3">
@@ -247,7 +264,14 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                     className="hover:bg-[#f5f8f4] cursor-pointer transition-colors"
                   >
                     <td className="py-3 px-4 font-semibold text-[#21362d]">{p.name}</td>
-                    <td className="py-3 px-4 text-[#5d6e64]">{TYPE_NAMES[p.type]}</td>
+                    <td className="py-3 px-4 text-[#5d6e64]">
+                      <div>{TYPE_NAMES[p.type]}</div>
+                      {p.eventProducts && p.eventProducts.length > 0 && (
+                        <div className="text-[10px] text-[#244d3b] font-medium mt-0.5">
+                          {p.eventProducts.length} {p.eventProducts.length === 1 ? 'prodotto' : 'prodotti'}
+                        </div>
+                      )}
+                    </td>
                     <td className="py-3 px-4 text-[#78867d]">{client?.name || '—'}</td>
                     <td className="py-3 px-4 text-[#263a32]">{formatDateIt(p.due)}</td>
                     <td className="py-3 px-4">{p.owner}</td>

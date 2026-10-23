@@ -46,7 +46,8 @@ export const projects = pgTable('projects', {
   id: text('id').primaryKey(),
   clientId: text('client_id').references(() => clients.id, { onDelete: 'set null' }),
   name: text('name').notNull(),
-  type: text('type').notNull(), // 'wedding' | 'b2b' | 'website' | 'retail' | 'design' | 'other'
+  type: text('type').notNull(), // 'eventi' | 'grafica' | 'cartoleria' | 'wedding' | 'b2b' | 'website' | 'retail' | 'design' | 'other'
+  eventProducts: text('event_products'), // JSON stringified array of EventProductType
   status: text('status').notNull().default('new'),
   priority: text('priority').notNull().default('normal'),
   owner: text('owner').notNull().default('Giulia'),

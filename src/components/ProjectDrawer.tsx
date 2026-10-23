@@ -26,7 +26,7 @@ import {
   Check,
 } from 'lucide-react';
 import { Project, Task, ViewType, Client, FinancialRecord, TransactionType } from '../types';
-import { TYPE_NAMES, STATUS_NAMES, STATUS_TAGS, EXPENSE_CATEGORIES, REVENUE_CATEGORIES } from '../lib/constants';
+import { TYPE_NAMES, STATUS_NAMES, STATUS_TAGS, EXPENSE_CATEGORIES, REVENUE_CATEGORIES, EVENT_PRODUCTS_LIST } from '../lib/constants';
 import { formatDateIt, formatNumber, formatMoney, TODAY_ISO } from '../lib/plannerEngine';
 import { useStudio } from '../context/StudioContext';
 import { getGmailComposeUrl } from '../lib/gmail';
@@ -320,6 +320,32 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
               </p>
             </div>
           </div>
+
+          {/* Selected Event Products */}
+          {project.eventProducts && project.eventProducts.length > 0 && (
+            <div className="p-4 rounded-xl border border-[#dce6dc] bg-[#f8faf8] space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wider font-bold text-[#244d3b] flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-[#244d3b]" /> Prodotti Evento Inclusi ({project.eventProducts.length})
+                </span>
+                <span className="text-[10px] text-[#58725f] font-medium">Flussi dedicati generati</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {project.eventProducts.map((prodId) => {
+                  const meta = EVENT_PRODUCTS_LIST.find((ep) => ep.id === prodId);
+                  return (
+                    <span
+                      key={prodId}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white border border-[#cfe0cf] text-[#244d3b] shadow-2xs flex items-center gap-1.5"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#3e7e59]" />
+                      {meta?.label || prodId}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Conditional Rendering by Active Tab */}
           {activeDrawerTab === 'workflow' ? (

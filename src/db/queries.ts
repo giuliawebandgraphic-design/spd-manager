@@ -36,16 +36,27 @@ export async function getAllStudioData() {
       feedback: dbFeedback.filter((fb) => fb.proofId === prf.id),
     }));
 
-    const projectsWithDetails = dbProjects.map((p) => ({
-      ...p,
-      tasks: dbTasks
-        .filter((t) => t.projectId === p.id)
-        .map((t) => ({
-          ...t,
-          hours: Number(t.hours) || 1,
-        })),
-      proofs: proofsWithFeedback.filter((prf) => prf.projectId === p.id),
-    }));
+    const projectsWithDetails = dbProjects.map((p) => {
+      let parsedEventProducts;
+      if (p.eventProducts) {
+        try {
+          parsedEventProducts = typeof p.eventProducts === 'string' ? JSON.parse(p.eventProducts) : p.eventProducts;
+        } catch {
+          parsedEventProducts = undefined;
+        }
+      }
+      return {
+        ...p,
+        eventProducts: parsedEventProducts,
+        tasks: dbTasks
+          .filter((t) => t.projectId === p.id)
+          .map((t) => ({
+            ...t,
+            hours: Number(t.hours) || 1,
+          })),
+        proofs: proofsWithFeedback.filter((prf) => prf.projectId === p.id),
+      };
+    });
 
     const quotesWithItems = dbQuotes.map((q) => ({
       ...q,
@@ -121,7 +132,8 @@ export async function createProjectRecord(project: any, tasksList: any[] = []) {
       id: project.id,
       clientId: (project.clientId && String(project.clientId).trim() !== '') ? project.clientId : null,
       name: project.name || 'Senza Titolo',
-      type: project.type || 'wedding',
+      type: project.type || 'eventi',
+      eventProducts: project.eventProducts ? JSON.stringify(project.eventProducts) : null,
       status: project.status || 'new',
       priority: project.priority || 'normal',
       owner: project.owner || 'Giulia',
@@ -185,6 +197,9 @@ export async function updateProjectRecord(id: string, updates: any) {
       sanitized.clientId = (updates.clientId && String(updates.clientId).trim() !== '') ? updates.clientId : null;
     }
     if (updates.type !== undefined) sanitized.type = updates.type;
+    if (updates.eventProducts !== undefined) {
+      sanitized.eventProducts = updates.eventProducts ? JSON.stringify(updates.eventProducts) : null;
+    }
     if (updates.status !== undefined) sanitized.status = updates.status;
     if (updates.priority !== undefined) sanitized.priority = updates.priority;
     if (updates.owner !== undefined) sanitized.owner = updates.owner;
