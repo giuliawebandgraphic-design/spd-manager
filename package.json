@@ -9,6 +9,7 @@
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
+    "validate-env": "tsx scripts/validate-env.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

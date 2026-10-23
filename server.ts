@@ -26,6 +26,31 @@ app.get('/api/studio/data', async (_req, res) => {
   }
 });
 
+// Diagnostic & Environment Health Check
+app.get('/api/health/env', async (_req, res) => {
+  const envReport = {
+    timestamp: new Date().toISOString(),
+    status: 'ok',
+    database: {
+      sqlHostConfigured: Boolean(process.env.SQL_HOST),
+      sqlDbName: process.env.SQL_DB_NAME || null,
+      sqlUserConfigured: Boolean(process.env.SQL_USER),
+      sqlPasswordConfigured: Boolean(process.env.SQL_PASSWORD),
+      sqlAdminConfigured: Boolean(process.env.SQL_ADMIN_USER && process.env.SQL_ADMIN_PASSWORD),
+    },
+    platform: {
+      port: process.env.PORT || 3000,
+      geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+      appUrlConfigured: Boolean(process.env.APP_URL),
+    },
+    client: {
+      googleClientConfigured: Boolean(process.env.VITE_GOOGLE_CLIENT_ID),
+      supabaseConfigured: Boolean(process.env.VITE_SUPABASE_URL && process.env.VITE_SUPABASE_ANON_KEY),
+    },
+  };
+  res.json(envReport);
+});
+
 // 1b. Batch sync push: persist local or offline projects & clients into Cloud SQL
 app.post('/api/studio/sync-push', async (req, res) => {
   try {
