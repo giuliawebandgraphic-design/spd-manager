@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as queries from './src/db/queries.ts';
+import { ensureDatabaseSchema } from './src/db/initialize.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,6 +11,17 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
+
+// Vercel functions are ephemeral but Neon is not: initialise only the schema,
+// never seed or reset it. The promise is cached for warm function instances.
+app.use('/api', async (_req, _res, next) => {
+  try {
+    await ensureDatabaseSchema();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // CLOUD SQL POSTGRESQL REST API ROUTES
@@ -32,11 +44,9 @@ app.get('/api/health/env', async (_req, res) => {
     timestamp: new Date().toISOString(),
     status: 'ok',
     database: {
-      sqlHostConfigured: Boolean(process.env.SQL_HOST),
-      sqlDbName: process.env.SQL_DB_NAME || null,
-      sqlUserConfigured: Boolean(process.env.SQL_USER),
-      sqlPasswordConfigured: Boolean(process.env.SQL_PASSWORD),
-      sqlAdminConfigured: Boolean(process.env.SQL_ADMIN_USER && process.env.SQL_ADMIN_PASSWORD),
+      neonDatabaseUrlConfigured: Boolean(
+        process.env.DATABASE_URL || process.env.spdmanager_DATABASE_URL || process.env.POSTGRES_URL
+      ),
     },
     platform: {
       port: process.env.PORT || 3000,
@@ -54,9 +64,18 @@ app.get('/api/health/env', async (_req, res) => {
 // 1b. Batch sync push: persist local or offline projects & clients into Cloud SQL
 app.post('/api/studio/sync-push', async (req, res) => {
   try {
-    const { projects: localProjects, clients: localClients } = req.body;
+    const {
+      projects: localProjects,
+      clients: localClients,
+      quotes: localQuotes,
+      inventory: localInventory,
+      priceCatalog: localPriceCatalog,
+      financials: localFinancials,
+      settings: localSettings,
+    } = req.body;
     let syncedProjects = 0;
     let syncedClients = 0;
+    let syncedOtherRecords = 0;
 
     if (Array.isArray(localClients)) {
       for (const client of localClients) {
@@ -73,6 +92,16 @@ app.post('/api/studio/sync-push', async (req, res) => {
       for (const proj of localProjects) {
         try {
           await queries.createProjectRecord(proj, proj.tasks || []);
+          for (const proof of proj.proofs || []) {
+            try {
+              await queries.insertProofRecord(proof);
+              for (const feedback of proof.feedback || []) {
+                await queries.insertFeedbackRecord(feedback);
+              }
+            } catch (e) {
+              console.warn('Sync push proof warning:', e);
+            }
+          }
           syncedProjects++;
         } catch (e) {
           console.warn('Sync push project warning:', e);
@@ -80,8 +109,45 @@ app.post('/api/studio/sync-push', async (req, res) => {
       }
     }
 
+    if (Array.isArray(localQuotes)) {
+      for (const quote of localQuotes) {
+        try {
+          await queries.insertQuoteRecord(quote, quote.items || []);
+          syncedOtherRecords++;
+        } catch (e) { console.warn('Sync push quote warning:', e); }
+      }
+    }
+    if (Array.isArray(localInventory)) {
+      for (const item of localInventory) {
+        try {
+          await queries.insertInventoryRecord(item);
+          syncedOtherRecords++;
+        } catch (e) { console.warn('Sync push inventory warning:', e); }
+      }
+    }
+    if (Array.isArray(localPriceCatalog)) {
+      for (const item of localPriceCatalog) {
+        try {
+          await queries.insertPriceCatalogRecord(item);
+          syncedOtherRecords++;
+        } catch (e) { console.warn('Sync push price catalog warning:', e); }
+      }
+    }
+    if (Array.isArray(localFinancials)) {
+      for (const record of localFinancials) {
+        try {
+          await queries.insertFinancialRecord(record);
+          syncedOtherRecords++;
+        } catch (e) { console.warn('Sync push financial record warning:', e); }
+      }
+    }
+    if (localSettings && typeof localSettings === 'object') {
+      await queries.updateStudioSettingsRecord(localSettings);
+      syncedOtherRecords++;
+    }
+
     const freshData = await queries.getAllStudioData();
-    res.json({ success: true, syncedProjects, syncedClients, data: freshData });
+    res.json({ success: true, syncedProjects, syncedClients, syncedOtherRecords, data: freshData });
   } catch (err: any) {
     console.error('API POST /api/studio/sync-push error:', err);
     res.status(500).json({ error: 'Failed to sync local data to Cloud SQL' });
@@ -373,4 +439,15 @@ async function startServer() {
   });
 }
 
-startServer();
+// A local `npm run dev` starts the HTTP server. On Vercel this file is imported
+// by the function handler, so it must not listen on a port itself.
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  startServer();
+}
+
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled API error:', err);
+  res.status(500).json({ error: 'Database service is temporarily unavailable' });
+});
+
+export default app;
