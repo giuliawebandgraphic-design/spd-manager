@@ -268,7 +268,37 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       try {
         const res = await fetch('/api/studio/data');
         if (res.ok) {
-          const data = await res.json();
+          let data = await res.json();
+
+          // A newly provisioned Neon database is deliberately empty. Preserve
+          // the data already cached in this browser by importing it once,
+          // before treating Neon as the source of truth.
+          if (data && Array.isArray(data.projects) && data.projects.length === 0) {
+            const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+            if (stored) {
+              const cached = JSON.parse(stored);
+              const hasCachedData = [
+                cached.projects,
+                cached.clients,
+                cached.quotes,
+                cached.inventory,
+                cached.priceCatalog,
+                cached.financials,
+              ].some((items) => Array.isArray(items) && items.length > 0);
+
+              if (hasCachedData) {
+                const importResponse = await fetch('/api/studio/sync-push', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(cached),
+                });
+                if (importResponse.ok) {
+                  data = (await importResponse.json()).data;
+                }
+              }
+            }
+          }
+
           if (data && Array.isArray(data.projects)) {
             if (!isMounted) return;
 
