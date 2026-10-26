@@ -163,6 +163,7 @@ export async function createProjectRecord(project: any, tasksList: any[] = []) {
       due: project.due || new Date().toISOString().slice(0, 10),
       eventDate: (project.eventDate && String(project.eventDate).trim() !== '') ? project.eventDate : null,
       notes: project.notes || '',
+      driveFolderUrl: project.driveFolderUrl || null,
       approved: Boolean(project.approved),
       approvedAt: project.approvedAt || null,
       approvedBy: project.approvedBy || null,
@@ -191,6 +192,9 @@ export async function createProjectRecord(project: any, tasksList: any[] = []) {
           done: Boolean(t.done),
           doneAt: t.doneAt || null,
           sortOrder: Number(t.sortOrder ?? idx) || idx,
+          scheduledDate: t.scheduledDate || null,
+          scheduledSlot: t.scheduledSlot || null,
+          scheduledOwner: t.scheduledOwner || null,
         };
 
         const existingTask = await db
@@ -231,6 +235,7 @@ export async function updateProjectRecord(id: string, updates: any) {
       sanitized.eventDate = (updates.eventDate && String(updates.eventDate).trim() !== '') ? updates.eventDate : null;
     }
     if (updates.notes !== undefined) sanitized.notes = updates.notes || '';
+    if (updates.driveFolderUrl !== undefined) sanitized.driveFolderUrl = updates.driveFolderUrl || null;
     if (updates.approved !== undefined) sanitized.approved = Boolean(updates.approved);
     if (updates.approvedAt !== undefined) sanitized.approvedAt = updates.approvedAt || null;
     if (updates.approvedBy !== undefined) sanitized.approvedBy = updates.approvedBy || null;
@@ -391,6 +396,7 @@ export async function insertClientRecord(client: any) {
       billingNotes: client.billingNotes || null,
       fiscalDataCompleted: Boolean(client.fiscalDataCompleted),
       fiscalDataUpdatedAt: client.fiscalDataUpdatedAt || null,
+      driveFolderUrl: client.driveFolderUrl || null,
     };
 
     if (existing.length > 0) {
@@ -411,7 +417,7 @@ export async function updateClientRecord(id: string, updates: any) {
       'portalToken', 'portalPassword', 'portalEnabled', 'fiscalType', 'fiscalCode',
       'vatNumber', 'companyLegalName', 'sdiCode', 'pec', 'billingAddress',
       'billingCap', 'billingCity', 'billingProvince', 'billingCountry', 'billingNotes',
-      'fiscalDataCompleted', 'fiscalDataUpdatedAt'
+      'fiscalDataCompleted', 'fiscalDataUpdatedAt', 'driveFolderUrl'
     ];
     const sanitized: any = {};
     for (const k of validKeys) {

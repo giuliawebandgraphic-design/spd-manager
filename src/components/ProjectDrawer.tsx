@@ -33,12 +33,14 @@ import {
   CalendarDays,
   BookmarkCheck,
   ListTodo,
+  FolderGit2,
 } from 'lucide-react';
 import { Project, Task, ViewType, Client, FinancialRecord, TransactionType, Meeting } from '../types';
 import { TYPE_NAMES, STATUS_NAMES, STATUS_TAGS, EXPENSE_CATEGORIES, REVENUE_CATEGORIES, EVENT_PRODUCTS_LIST } from '../lib/constants';
 import { formatDateIt, formatNumber, formatMoney, TODAY_ISO } from '../lib/plannerEngine';
 import { useStudio } from '../context/StudioContext';
 import { getGmailComposeUrl } from '../lib/gmail';
+import { isPdfUrl, isGoogleDriveLink } from '../lib/driveUtils';
 import { FinancialRecordModal } from './FinancialRecordModal';
 import { MeetingModal } from './MeetingModal';
 import { createGoogleMeetingCalendarLink } from '../lib/googleCalendar';
@@ -214,21 +216,28 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
     e.preventDefault();
     if (!proofTitle.trim()) return;
 
+    const url = proofFileUrl.trim();
+    const isDrive = isGoogleDriveLink(url);
+    const isPdf = isPdfUrl(url, proofTitle);
+    const extension = isPdf ? '.pdf' : '.jpg';
+    const computedFileName = proofTitle.trim().replace(/\s+/g, '_') + (proofTitle.toLowerCase().endsWith('.pdf') ? '' : extension);
+
     addProof(project.id, {
       projectId: project.id,
       title: proofTitle.trim(),
       fileUrl:
-        proofFileUrl.trim() ||
+        url ||
         'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=1200&q=80',
-      fileName: `${proofTitle.trim().replace(/\s+/g, '_')}.pdf`,
-      fileSize: '3.8 MB',
+      fileName: computedFileName,
+      fileSize: isPdf ? '4.2 MB (PDF)' : '2.8 MB',
       uploadedBy: project.owner,
-      notes: 'Bozza caricata per revisione cliente.',
+      notes: isDrive ? 'Bozza caricata da Google Drive per revisione cliente.' : 'Bozza caricata per revisione cliente.',
     });
 
     setProofTitle('');
     setProofFileUrl('');
     setShowUploadForm(false);
+    showToast('✓ Nuova bozza caricata e resa disponibile per il cliente!');
   };
 
   return (
@@ -279,6 +288,18 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
                   >
                     <Mail className="w-3 h-3 text-[#ea4335]" />
                     <span>Scrivi su Gmail</span>
+                  </a>
+                )}
+                {(project.driveFolderUrl || client?.driveFolderUrl) && (
+                  <a
+                    href={project.driveFolderUrl || client?.driveFolderUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#1a5fb4] bg-[#edf4fc] hover:bg-[#e1edfa] px-2 py-0.5 rounded-md border border-[#c5ddf6] transition-colors"
+                    title="Apri la cartella Google Drive con i file del cliente"
+                  >
+                    <FolderGit2 className="w-3 h-3 text-[#1a5fb4]" />
+                    <span>Cartella Drive ↗</span>
                   </a>
                 )}
                 {client && (
@@ -645,11 +666,14 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
                 />
                 <input
                   type="url"
-                  placeholder="URL immagine anteprima (opzionale)"
+                  placeholder="Link file PDF o bozza (Google Drive, Dropbox, URL diretto)..."
                   value={proofFileUrl}
                   onChange={(e) => setProofFileUrl(e.target.value)}
-                  className="w-full text-xs p-2 rounded-lg bg-white border border-[#e5e9e3]"
+                  className="w-full text-xs p-2 rounded-lg bg-white border border-[#e5e9e3] font-mono text-[11px]"
                 />
+                <p className="text-[10px] text-[#5d6e64] bg-[#edf2eb] p-1.5 rounded-md">
+                  💡 Incolla il link condivisibile di Google Drive o un link a file PDF: nel portale del cliente verrà visualizzata l'anteprima interattiva sfogliabile ad alta definizione.
+                </p>
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"

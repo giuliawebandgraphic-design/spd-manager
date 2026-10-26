@@ -171,6 +171,26 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   </p>
                 )}
 
+                {/* Google Drive Folder link if configured */}
+                {client.driveFolderUrl && (
+                  <div className="mt-2.5 p-2 rounded-xl border border-[#d6e3f3] bg-[#f4f8fd] flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 text-[#1b5fa8] font-medium text-[11px] truncate">
+                      <FolderGit2 className="w-3.5 h-3.5 text-[#1b5fa8] shrink-0" />
+                      <span className="truncate">Cartella Drive Condivisa</span>
+                    </span>
+                    <a
+                      href={client.driveFolderUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2 py-1 rounded-lg bg-white border border-[#c3daf5] hover:bg-[#e6f0fc] text-[#1b5fa8] font-bold text-[10px] shrink-0 flex items-center gap-1 shadow-2xs transition-colors"
+                      title="Apri cartella Google Drive del cliente in una nuova scheda"
+                    >
+                      <span>Apri Drive</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                )}
+
                 {/* Dati Fiscali status card */}
                 <div className="mt-2.5 p-2.5 rounded-xl border border-[#eef2ec] bg-[#fafbf9] text-xs">
                   <div className="flex items-center justify-between mb-1">

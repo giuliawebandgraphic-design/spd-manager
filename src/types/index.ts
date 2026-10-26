@@ -98,6 +98,7 @@ export interface Project {
   approvedAt?: string;
   approvedBy?: string;
   notes: string;
+  driveFolderUrl?: string;
   tasks: Task[];
   proofs?: Proof[];
   createdAt?: string;
@@ -116,6 +117,7 @@ export interface Client {
   taxId?: string;
   address?: string;
   notes?: string;
+  driveFolderUrl?: string;
   portalToken: string;
   portalPassword?: string;
   portalEnabled: boolean;

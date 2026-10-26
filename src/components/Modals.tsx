@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Lock,
   RefreshCw,
+  FolderGit2,
 } from 'lucide-react';
 import {
   Project,
@@ -69,6 +70,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
   const [priority, setPriority] = useState<ProjectPriority>('normal');
   const [status, setStatus] = useState<ProjectStatus>('new');
   const [notes, setNotes] = useState('');
+  const [driveFolderUrl, setDriveFolderUrl] = useState('');
 
   useEffect(() => {
     if (project) {
@@ -86,6 +88,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
       setPriority(project.priority);
       setStatus(project.status);
       setNotes(project.notes || '');
+      setDriveFolderUrl(project.driveFolderUrl || '');
     } else {
       setName('');
       setType('eventi');
@@ -97,6 +100,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
       setPriority('normal');
       setStatus('new');
       setNotes('');
+      setDriveFolderUrl('');
     }
   }, [project, clients, isOpen]);
 
@@ -134,6 +138,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
         priority,
         status,
         notes: notes.trim(),
+        driveFolderUrl: driveFolderUrl.trim() || undefined,
       });
     } else {
       createProject({
@@ -148,6 +153,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
         status,
         approved: false,
         notes: notes.trim(),
+        driveFolderUrl: driveFolderUrl.trim() || undefined,
       });
     }
     onClose();
@@ -409,6 +415,26 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ isOpen, onClose, pro
             />
           </div>
 
+          <div className="p-3 bg-[#f8faf6] rounded-xl border border-[#e2ece0] space-y-1.5">
+            <label className="block text-xs font-bold text-[#263a32] flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <FolderGit2 className="w-3.5 h-3.5 text-[#244d3b]" />
+                Cartella Google Drive Condivisa (opzionale)
+              </span>
+              <span className="text-[10px] text-[#78867d]">Cartella file per il cliente</span>
+            </label>
+            <input
+              type="url"
+              value={driveFolderUrl}
+              onChange={(e) => setDriveFolderUrl(e.target.value)}
+              placeholder="https://drive.google.com/drive/folders/..."
+              className="w-full text-xs p-2.5 rounded-xl bg-white border border-[#e5e9e3] focus:border-[#68816e] focus:outline-hidden font-mono"
+            />
+            <p className="text-[10px] text-[#78867d]">
+              Se impostata, il cliente troverà un pulsante diretto per accedere alla cartella Drive con tutti i suoi file e bozze nel portale.
+            </p>
+          </div>
+
           {!project && (
             <div className="p-3 bg-[#edf2eb] rounded-xl text-xs text-[#375643] flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-[#68816e] shrink-0" />
@@ -462,6 +488,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
   const [companyName, setCompanyName] = useState('');
   const [notes, setNotes] = useState('');
   const [portalPassword, setPortalPassword] = useState('');
+  const [driveFolderUrl, setDriveFolderUrl] = useState('');
 
   // Fiscal fields
   const [showFiscalDetails, setShowFiscalDetails] = useState(false);
@@ -488,6 +515,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
       setCompanyName(client.companyName || '');
       setNotes(client.notes || '');
       setPortalPassword(client.portalPassword || generatePortalPassword(client.name));
+      setDriveFolderUrl(client.driveFolderUrl || '');
 
       setFiscalType(client.fiscalType || (client.type === 'Azienda' ? 'azienda' : client.type === 'Professionista' ? 'libero_professionista' : 'privato'));
       setCompanyLegalName(client.companyLegalName || client.companyName || client.name || '');
@@ -513,6 +541,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
       setCompanyName('');
       setNotes('');
       setPortalPassword(generatePortalPassword('SP'));
+      setDriveFolderUrl('');
 
       setFiscalType('privato');
       setCompanyLegalName('');
@@ -564,6 +593,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
         companyName: companyName.trim() || undefined,
         notes: notes.trim(),
         portalPassword: portalPassword.trim() || undefined,
+        driveFolderUrl: driveFolderUrl.trim() || undefined,
         ...fiscalPayload,
       });
     } else {
@@ -576,6 +606,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
         notes: notes.trim(),
         portalPassword: portalPassword.trim() || undefined,
         portalEnabled: true,
+        driveFolderUrl: driveFolderUrl.trim() || undefined,
         ...fiscalPayload,
       });
     }
@@ -689,6 +720,27 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, clien
             </div>
             <p className="text-[10px] text-[#78867d]">
               Il cliente dovrà inserire questa password per accedere alla propria scheda e consultare le bozze.
+            </p>
+          </div>
+
+          {/* Cartella Google Drive Condivisa */}
+          <div className="p-3 bg-[#f8faf6] rounded-xl border border-[#e2ece0] space-y-1.5">
+            <label className="block text-xs font-bold text-[#263a32] flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <FolderGit2 className="w-3.5 h-3.5 text-[#244d3b]" />
+                Cartella Google Drive Condivisa per il Cliente
+              </span>
+              <span className="text-[10px] text-[#78867d]">Cartella Drive</span>
+            </label>
+            <input
+              type="url"
+              value={driveFolderUrl}
+              onChange={(e) => setDriveFolderUrl(e.target.value)}
+              placeholder="https://drive.google.com/drive/folders/..."
+              className="w-full text-xs p-2.5 rounded-xl bg-white border border-[#e5e9e3] focus:border-[#68816e] focus:outline-hidden font-mono"
+            />
+            <p className="text-[10px] text-[#78867d]">
+              Inserisci il link alla cartella Google Drive che hai predisposto per questo cliente (bozze PDF, foto alta risoluzione, materiali). Sarà consultabile direttamente nel suo portale.
             </p>
           </div>
 

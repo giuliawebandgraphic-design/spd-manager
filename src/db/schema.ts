@@ -39,6 +39,7 @@ export const clients = pgTable('clients', {
   billingNotes: text('billing_notes'),
   fiscalDataCompleted: boolean('fiscal_data_completed').default(false),
   fiscalDataUpdatedAt: text('fiscal_data_updated_at'),
+  driveFolderUrl: text('drive_folder_url'),
 });
 
 // 3. Projects
@@ -54,6 +55,7 @@ export const projects = pgTable('projects', {
   due: text('due').notNull(),
   eventDate: text('event_date'),
   notes: text('notes').default(''),
+  driveFolderUrl: text('drive_folder_url'),
   approved: boolean('approved').notNull().default(false),
   approvedAt: text('approved_at'),
   approvedBy: text('approved_by'),
