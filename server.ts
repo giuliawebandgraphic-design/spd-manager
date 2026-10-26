@@ -3,7 +3,6 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as queries from './src/db/queries.ts';
-import { ensureDatabaseSchema } from './src/db/initialize.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,18 +11,6 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
-
-// Vercel functions are ephemeral but Neon is not: initialise only the schema,
-// never seed or reset it. The promise is cached for warm function instances.
-app.use('/api', async (_req, _res, next) => {
-  try {
-    await ensureDatabaseSchema();
-    next();
-  } catch (error) {
-    console.warn('ensureDatabaseSchema non-fatal notice:', error);
-    next();
-  }
-});
 
 // ---------------------------------------------------------------------------
 // CLOUD SQL POSTGRESQL REST API ROUTES
