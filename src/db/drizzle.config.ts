@@ -3,23 +3,36 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const databaseUrl =
-  process.env.DATABASE_URL ||
-  process.env.spdmanager_DATABASE_URL ||
-  process.env.POSTGRES_URL ||
-  process.env.spdmanager_POSTGRES_URL;
+const sqlHost = process.env.SQL_HOST;
+const sqlDbName = process.env.SQL_DB_NAME;
+const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER;
+const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD;
 
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL (or spdmanager_DATABASE_URL from Vercel Neon) must be set.");
-}
+export default defineConfig(
+  sqlHost
+    ? {
+        schema: "./src/db/schema.ts",
+        out: "./drizzle",
+        dialect: "postgresql",
+        schemaFilter: ["public"],
+        dbCredentials: {
+          host: sqlHost,
+          user: user!,
+          password: password!,
+          database: sqlDbName!,
+          ssl: false,
+        },
+        verbose: true,
+      }
+    : {
+        schema: "./src/db/schema.ts",
+        out: "./drizzle",
+        dialect: "postgresql",
+        schemaFilter: ["public"],
+        dbCredentials: {
+          url: (process.env.DATABASE_URL || process.env.POSTGRES_URL)!,
+        },
+        verbose: true,
+      }
+);
 
-export default defineConfig({
-  schema: "./src/db/schema.ts",
-  out: "./drizzle",
-  dialect: "postgresql",
-  schemaFilter: ["public"],
-  dbCredentials: {
-    url: databaseUrl,
-  },
-  verbose: true,
-});

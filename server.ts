@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -8,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
 app.use(express.json());
 
@@ -19,7 +20,8 @@ app.use('/api', async (_req, _res, next) => {
     await ensureDatabaseSchema();
     next();
   } catch (error) {
-    next(error);
+    console.warn('ensureDatabaseSchema non-fatal notice:', error);
+    next();
   }
 });
 
@@ -481,9 +483,8 @@ async function startServer() {
   });
 }
 
-// A local `npm run dev` starts the HTTP server. On Vercel this file is imported
-// by the function handler, so it must not listen on a port itself.
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+// Start HTTP server in dev and standalone runtimes
+if (!process.env.VERCEL) {
   startServer();
 }
 

@@ -4,11 +4,6 @@ import * as schema from './schema.ts';
 
 const { Pool } = pg;
 
-/**
- * Vercel's Neon integration namespaces the variables it adds to a project.
- * Accept the standard names too, so local development can use a normal
- * DATABASE_URL without copying production credentials.
- */
 function getDatabaseUrl(): string | undefined {
   return (
     process.env.DATABASE_URL ||
@@ -23,24 +18,33 @@ declare global {
   var _postgresPool: pg.Pool | undefined;
 }
 
-// Function to create or retrieve the connection pool using the Object Method
+// Function to create or retrieve the connection pool using the Object Method for Cloud SQL
 export const createPool = (): pg.Pool => {
   if (!global._postgresPool) {
-    const connectionString = getDatabaseUrl();
-    if (!connectionString) {
-      throw new Error(
-        'Database connection is not configured. Set DATABASE_URL (or the Vercel Neon spdmanager_DATABASE_URL variable).'
-      );
-    }
+    if (process.env.SQL_HOST) {
+      global._postgresPool = new Pool({
+        host: process.env.SQL_HOST,
+        user: process.env.SQL_USER,
+        password: process.env.SQL_PASSWORD,
+        database: process.env.SQL_DB_NAME,
+        max: 10,
+        connectionTimeoutMillis: 15000,
+      });
+    } else {
+      const connectionString = getDatabaseUrl();
+      if (!connectionString) {
+        throw new Error(
+          'Database connection is not configured. Set SQL_HOST or DATABASE_URL.'
+        );
+      }
 
-    global._postgresPool = new Pool({
-      connectionString,
-      // Neon requires TLS. This also works with Neon URLs that include
-      // sslmode=require and avoids relying on a local CA bundle in Vercel.
-      ssl: { rejectUnauthorized: false },
-      max: 5,
-      connectionTimeoutMillis: 15000,
-    });
+      global._postgresPool = new Pool({
+        connectionString,
+        ssl: { rejectUnauthorized: false },
+        max: 5,
+        connectionTimeoutMillis: 15000,
+      });
+    }
 
     // Prevent unhandled pool-level errors from crashing the application
     global._postgresPool.on('error', (err) => {
@@ -57,3 +61,4 @@ const pool = createPool();
 export const db = drizzle(pool, { schema });
 
 export { getDatabaseUrl, pool };
+
