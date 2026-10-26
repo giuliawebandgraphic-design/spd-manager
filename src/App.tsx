@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ViewType, Project, Client, Quote, InventoryItem, Task, PriceCatalogItem, FinancialRecord } from './types';
+import { ViewType, Project, Client, Quote, InventoryItem, Task, PriceCatalogItem, FinancialRecord, Meeting } from './types';
 import { StudioProvider, useStudio } from './context/StudioContext';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -14,8 +14,10 @@ import {
 } from './components/Modals';
 import { SharePortalModal } from './components/SharePortalModal';
 import { FinancialRecordModal } from './components/FinancialRecordModal';
+import { MeetingModal } from './components/MeetingModal';
 import { DashboardView } from './views/DashboardView';
 import { ProjectsView } from './views/ProjectsView';
+import { MeetingsView } from './views/MeetingsView';
 import { PlannerView } from './views/PlannerView';
 import { ProductionView } from './views/ProductionView';
 import { ClientsView } from './views/ClientsView';
@@ -59,6 +61,10 @@ const StudioAppContent: React.FC = () => {
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [taskProjectId, setTaskProjectId] = useState<string>('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+
+  // Meeting Modal State
+  const [meetingModalOpen, setMeetingModalOpen] = useState(false);
+  const [editingMeeting, setEditingMeeting] = useState<Meeting | null>(null);
 
   // Financial Transaction Modal
   const [financialModalOpen, setFinancialModalOpen] = useState(false);
@@ -108,8 +114,11 @@ const StudioAppContent: React.FC = () => {
   };
 
   // Handle open modal from quick action dropdown
-  const handleOpenNewModal = (kind: 'project' | 'client' | 'quote' | 'stock' | 'price_item' | 'transaction') => {
-    if (kind === 'project') {
+  const handleOpenNewModal = (kind: 'project' | 'client' | 'quote' | 'stock' | 'price_item' | 'transaction' | 'meeting') => {
+    if (kind === 'meeting') {
+      setEditingMeeting(null);
+      setMeetingModalOpen(true);
+    } else if (kind === 'project') {
       setEditingProject(null);
       setProjectModalOpen(true);
     } else if (kind === 'client') {
@@ -228,6 +237,10 @@ const StudioAppContent: React.FC = () => {
               }}
               searchQuery={searchQuery}
             />
+          )}
+
+          {currentView === 'meetings' && (
+            <MeetingsView onSelectProject={(p) => setDrawerProject(p)} />
           )}
 
           {currentView === 'planner' && (
@@ -421,6 +434,15 @@ const StudioAppContent: React.FC = () => {
           setEditingFinancialRecord(null);
         }}
         record={editingFinancialRecord}
+      />
+
+      <MeetingModal
+        isOpen={meetingModalOpen}
+        onClose={() => {
+          setMeetingModalOpen(false);
+          setEditingMeeting(null);
+        }}
+        meeting={editingMeeting}
       />
 
       {/* Real-time Cloud Sync Toast Notification */}

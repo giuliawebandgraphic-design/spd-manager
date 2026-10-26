@@ -24,6 +24,15 @@ export type TeamMemberName = 'Giulia' | 'Claudia';
 
 export type GateType = '' | 'approval' | 'production';
 
+export type DayPartSlot = 'mattina' | 'pomeriggio';
+
+export interface DaySlotAvailability {
+  mattina: boolean;
+  pomeriggio: boolean;
+  mattinaHours?: number;
+  pomeriggioHours?: number;
+}
+
 export interface Task {
   id: string;
   name: string;
@@ -34,6 +43,19 @@ export interface Task {
   done: boolean;
   doneAt?: string;
   calendarEventId?: string;
+  scheduledDate?: string; // YYYY-MM-DD se schedulata, altrimenti non schedulata
+  scheduledSlot?: DayPartSlot; // 'mattina' | 'pomeriggio'
+  scheduledOwner?: TeamMemberName;
+}
+
+export interface WeeklyAvailability {
+  id: string; // e.g. "2026-W44"
+  weekStart: string; // YYYY-MM-DD del lunedì
+  giuliaHours: number;
+  claudiaHours: number;
+  giuliaDaily?: Record<string, DaySlotAvailability | any>; // orari giornalieri o slot mattina/pomeriggio
+  claudiaDaily?: Record<string, DaySlotAvailability | any>;
+  notes?: string;
 }
 
 export interface ProofFeedback {
@@ -239,11 +261,36 @@ export interface FinancialRecord {
   createdAt: string;
 }
 
+export type MeetingStatus = 'scheduled' | 'completed' | 'cancelled';
+export type MeetingLocationType = 'studio' | 'online' | 'location' | 'phone';
+
+export interface Meeting {
+  id: string;
+  projectId?: string;
+  clientId?: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime?: string; // HH:mm
+  locationType: MeetingLocationType;
+  locationDetails?: string;
+  status: MeetingStatus;
+  attendees?: string;
+  notes?: string;
+  decisions?: string;
+  actionItems?: string;
+  googleCalendarEventId?: string;
+  googleCalendarLink?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export type ViewType =
   | 'dashboard'
   | 'projects'
   | 'planner'
   | 'production'
+  | 'meetings'
   | 'clients'
   | 'quotes'
   | 'pricing'

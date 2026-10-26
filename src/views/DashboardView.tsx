@@ -29,7 +29,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigate,
   onNewProject,
 }) => {
-  const { projects, clients, quotes, inventory, plannerResult, settings, financials } = useStudio();
+  const { projects, clients, quotes, inventory, plannerResult, settings, financials, meetings } = useStudio();
   const [filterType, setFilterType] = useState<string>('all');
 
   const activeProjects = projects.filter(
@@ -64,6 +64,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Sort upcoming deliveries
   const upcomingDeliveries = [...activeProjects].sort((a, b) => a.due.localeCompare(b.due)).slice(0, 5);
+
+  const upcomingMeetings = (meetings || [])
+    .filter((m) => m.status === 'scheduled')
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 3);
 
   const giuliaBooked = plannerResult.totalHoursPerPerson.Giulia;
   const claudiaBooked = plannerResult.totalHoursPerPerson.Claudia;
@@ -355,8 +360,58 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Deadlines, Team Workload, Stock Warnings */}
+        {/* Right Column: Incontri Sposi, Deadlines, Team Workload */}
         <div className="space-y-6">
+          {/* Upcoming Couple Meetings Widget */}
+          <div className="p-6 bg-white rounded-2xl border border-[#e5e9e3] shadow-xs">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-serif text-lg font-normal text-[#21362d] flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-[#244d3b]" /> Incontri Sposi
+              </h3>
+              <button
+                onClick={() => onNavigate('meetings')}
+                className="text-xs font-semibold text-[#244d3b] hover:underline"
+              >
+                Vedi tutti ({meetings.length}) →
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {upcomingMeetings.map((m) => {
+                const proj = projects.find((p) => p.id === m.projectId);
+                return (
+                  <div
+                    key={m.id}
+                    onClick={() => onNavigate('meetings')}
+                    className="p-3 rounded-xl border border-[#eef2ec] bg-[#fafbf9] hover:bg-[#edf2eb] cursor-pointer transition-colors flex items-center justify-between text-xs"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <p className="font-semibold text-[#21362d] truncate">{m.title}</p>
+                      <p className="text-[11px] text-[#78867d] truncate">
+                        {formatDateIt(m.date)} · ore {m.startTime} {proj ? `· ${proj.name}` : ''}
+                      </p>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-md bg-[#edf2eb] text-[#244d3b] text-[10px] font-bold shrink-0">
+                      {m.locationType === 'online' ? 'Meet' : 'Studio'}
+                    </span>
+                  </div>
+                );
+              })}
+
+              {upcomingMeetings.length === 0 && (
+                <p className="text-xs text-[#8a968c] italic text-center py-2">
+                  Nessun incontro in programma.{' '}
+                  <button
+                    onClick={() => onNavigate('meetings')}
+                    className="text-[#244d3b] font-medium underline not-italic"
+                  >
+                    Pianifica ora
+                  </button>
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Upcoming Deliveries */}
           <div className="p-6 bg-white rounded-2xl border border-[#e5e9e3] shadow-xs">
             <div className="flex items-center justify-between mb-4">

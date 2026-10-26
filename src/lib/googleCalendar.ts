@@ -42,6 +42,62 @@ export function createGoogleCalendarEventLink(
   return url.toString();
 }
 
+export function createGoogleMeetingCalendarLink(meeting: {
+  title: string;
+  date: string; // YYYY-MM-DD
+  startTime?: string; // HH:mm
+  endTime?: string; // HH:mm
+  locationType?: string;
+  locationDetails?: string;
+  attendees?: string;
+  notes?: string;
+  decisions?: string;
+  actionItems?: string;
+  clientName?: string;
+  projectName?: string;
+}): string {
+  const dateClean = (meeting.date || '').replace(/-/g, '');
+  const startRaw = (meeting.startTime || '10:00').trim().replace(':', '');
+  const endRaw = (meeting.endTime || '11:00').trim().replace(':', '');
+  const dates = `${dateClean}T${startRaw.padEnd(4, '0')}00/${dateClean}T${endRaw.padEnd(4, '0')}00`;
+
+  let loc = '';
+  if (meeting.locationType === 'online') {
+    loc = meeting.locationDetails || 'Google Meet / Videochiamata Online';
+  } else if (meeting.locationType === 'location') {
+    loc = meeting.locationDetails || 'Sopralluogo Location Nozze';
+  } else if (meeting.locationType === 'phone') {
+    loc = 'Chiamata Telefonica';
+  } else {
+    loc = meeting.locationDetails || 'Atelier Sage Paper Studio';
+  }
+
+  const detailsSections: string[] = [];
+  if (meeting.projectName) detailsSections.push(`PROGETTO: ${meeting.projectName}`);
+  if (meeting.clientName || meeting.attendees) {
+    detailsSections.push(`SPOSI / PARTECIPANTI: ${meeting.attendees || meeting.clientName}`);
+  }
+  if (meeting.notes && meeting.notes.trim()) {
+    detailsSections.push(`\n--- APPUNTI & NOTE INCONTRO ---\n${meeting.notes.trim()}`);
+  }
+  if (meeting.decisions && meeting.decisions.trim()) {
+    detailsSections.push(`\n--- SCELTE & DECISIONI CONCORDATE ---\n${meeting.decisions.trim()}`);
+  }
+  if (meeting.actionItems && meeting.actionItems.trim()) {
+    detailsSections.push(`\n--- PROSSIMI PASSI (TO-DO) ---\n${meeting.actionItems.trim()}`);
+  }
+  detailsSections.push('\n[Gestionale Sage Paper Studio]');
+
+  const url = new URL('https://calendar.google.com/calendar/render');
+  url.searchParams.set('action', 'TEMPLATE');
+  url.searchParams.set('text', `Incontro Sposi: ${meeting.title}`);
+  url.searchParams.set('dates', dates);
+  url.searchParams.set('details', detailsSections.join('\n'));
+  if (loc) url.searchParams.set('location', loc);
+
+  return url.toString();
+}
+
 /**
  * Client-side OAuth 2.0 flow for Google Calendar API
  */

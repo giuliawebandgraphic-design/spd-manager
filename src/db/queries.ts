@@ -16,6 +16,8 @@ export async function getAllStudioData() {
       dbSettings,
       dbPriceCatalog,
       dbFinancials,
+      dbMeetings,
+      dbWeeklyAvailability,
     ] = await Promise.all([
       db.select().from(schema.clients),
       db.select().from(schema.projects),
@@ -28,6 +30,8 @@ export async function getAllStudioData() {
       db.select().from(schema.studioSettings).where(eq(schema.studioSettings.id, 'current')).limit(1),
       db.select().from(schema.priceCatalog).orderBy(asc(schema.priceCatalog.sortOrder)),
       db.select().from(schema.financialRecords).orderBy(desc(schema.financialRecords.date)),
+      db.select().from(schema.meetings).orderBy(asc(schema.meetings.date)),
+      db.select().from(schema.weeklyAvailability),
     ]);
 
     // Group tasks, proofs, and feedback by project
@@ -53,6 +57,9 @@ export async function getAllStudioData() {
           .map((t) => ({
             ...t,
             hours: Number(t.hours) || 1,
+            scheduledDate: t.scheduledDate || undefined,
+            scheduledSlot: (t.scheduledSlot as any) || undefined,
+            scheduledOwner: (t.scheduledOwner as any) || undefined,
           })),
         proofs: proofsWithFeedback.filter((prf) => prf.projectId === p.id),
       };
@@ -104,6 +111,20 @@ export async function getAllStudioData() {
       amount: Number(f.amount) || 0,
     }));
 
+    const formattedWeeklyAvailability = (dbWeeklyAvailability || []).map((w) => {
+      let giuliaDaily;
+      let claudiaDaily;
+      try { giuliaDaily = w.giuliaDaily ? JSON.parse(w.giuliaDaily) : undefined; } catch {}
+      try { claudiaDaily = w.claudiaDaily ? JSON.parse(w.claudiaDaily) : undefined; } catch {}
+      return {
+        ...w,
+        giuliaHours: Number(w.giuliaHours) || 30,
+        claudiaHours: Number(w.claudiaHours) || 4,
+        giuliaDaily,
+        claudiaDaily,
+      };
+    });
+
     return {
       clients: dbClients,
       projects: projectsWithDetails,
@@ -112,6 +133,8 @@ export async function getAllStudioData() {
       settings: formattedSettings,
       priceCatalog: formattedPriceCatalog,
       financials: formattedFinancials,
+      meetings: dbMeetings || [],
+      weeklyAvailability: formattedWeeklyAvailability,
     };
   } catch (error) {
     console.error('Failed to get studio data from Cloud SQL:', error);
@@ -245,6 +268,9 @@ export async function insertTaskRecord(task: any) {
       done: Boolean(task.done),
       doneAt: task.doneAt || null,
       sortOrder: Number(task.sortOrder) || 0,
+      scheduledDate: task.scheduledDate || null,
+      scheduledSlot: task.scheduledSlot || null,
+      scheduledOwner: task.scheduledOwner || null,
     });
   } catch (error) {
     console.error('Failed to insert task in Cloud SQL:', error);
@@ -254,8 +280,17 @@ export async function insertTaskRecord(task: any) {
 
 export async function updateTaskRecord(id: string, updates: any) {
   try {
-    const formatted = { ...updates };
+    const formatted: any = { ...updates };
     if (formatted.hours !== undefined) formatted.hours = String(formatted.hours);
+    if ('scheduledDate' in updates) {
+      formatted.scheduledDate = updates.scheduledDate ? updates.scheduledDate : null;
+    }
+    if ('scheduledSlot' in updates) {
+      formatted.scheduledSlot = updates.scheduledSlot ? updates.scheduledSlot : null;
+    }
+    if ('scheduledOwner' in updates) {
+      formatted.scheduledOwner = updates.scheduledOwner ? updates.scheduledOwner : null;
+    }
     await db.update(schema.tasks).set(formatted).where(eq(schema.tasks.id, id));
   } catch (error) {
     console.error('Failed to update task in Cloud SQL:', error);
@@ -640,6 +675,94 @@ export async function deleteFinancialRecord(id: string) {
     await db.delete(schema.financialRecords).where(eq(schema.financialRecords.id, id));
   } catch (error) {
     console.error('Failed to delete financial record in Cloud SQL:', error);
+    throw error;
+  }
+}
+
+// Meetings & Couples Consultation Queries (Incontri Sposi)
+export async function insertMeetingRecord(meeting: any) {
+  try {
+    const formatted = {
+      id: meeting.id,
+      projectId: (meeting.projectId && String(meeting.projectId).trim() !== '') ? meeting.projectId : null,
+      clientId: (meeting.clientId && String(meeting.clientId).trim() !== '') ? meeting.clientId : null,
+      title: meeting.title || 'Incontro Sposi',
+      date: meeting.date || new Date().toISOString().slice(0, 10),
+      startTime: meeting.startTime || '10:00',
+      endTime: meeting.endTime || '11:00',
+      locationType: meeting.locationType || 'studio',
+      locationDetails: meeting.locationDetails || '',
+      status: meeting.status || 'scheduled',
+      attendees: meeting.attendees || '',
+      notes: meeting.notes || '',
+      decisions: meeting.decisions || '',
+      actionItems: meeting.actionItems || '',
+      googleCalendarEventId: meeting.googleCalendarEventId || null,
+      googleCalendarLink: meeting.googleCalendarLink || null,
+      createdAt: meeting.createdAt || new Date().toISOString().slice(0, 10),
+      updatedAt: meeting.updatedAt || new Date().toISOString().slice(0, 10),
+    };
+
+    await db
+      .insert(schema.meetings)
+      .values(formatted)
+      .onConflictDoUpdate({
+        target: schema.meetings.id,
+        set: formatted,
+      });
+  } catch (error) {
+    console.error('Failed to insert meeting record in Cloud SQL:', error);
+    throw error;
+  }
+}
+
+export async function updateMeetingRecord(id: string, updates: any) {
+  try {
+    const formatted: any = {
+      ...updates,
+      updatedAt: new Date().toISOString().slice(0, 10),
+    };
+    if (formatted.projectId === '') formatted.projectId = null;
+    if (formatted.clientId === '') formatted.clientId = null;
+
+    await db.update(schema.meetings).set(formatted).where(eq(schema.meetings.id, id));
+  } catch (error) {
+    console.error('Failed to update meeting record in Cloud SQL:', error);
+    throw error;
+  }
+}
+
+export async function deleteMeetingRecord(id: string) {
+  try {
+    await db.delete(schema.meetings).where(eq(schema.meetings.id, id));
+  } catch (error) {
+    console.error('Failed to delete meeting record in Cloud SQL:', error);
+    throw error;
+  }
+}
+
+// Weekly Availability Plan Queries
+export async function upsertWeeklyAvailabilityRecord(item: any) {
+  try {
+    const formatted = {
+      id: item.id, // e.g. "2026-W44"
+      weekStart: item.weekStart,
+      giuliaHours: String(item.giuliaHours ?? 30),
+      claudiaHours: String(item.claudiaHours ?? 4),
+      giuliaDaily: item.giuliaDaily ? JSON.stringify(item.giuliaDaily) : null,
+      claudiaDaily: item.claudiaDaily ? JSON.stringify(item.claudiaDaily) : null,
+      notes: item.notes || '',
+    };
+
+    await db
+      .insert(schema.weeklyAvailability)
+      .values(formatted)
+      .onConflictDoUpdate({
+        target: schema.weeklyAvailability.id,
+        set: formatted,
+      });
+  } catch (error) {
+    console.error('Failed to upsert weekly availability in Cloud SQL:', error);
     throw error;
   }
 }

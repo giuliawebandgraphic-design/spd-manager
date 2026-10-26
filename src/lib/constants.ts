@@ -689,3 +689,42 @@ export function generatePortalPassword(clientName?: string): string {
   return `${prefix}-${code}`;
 }
 
+export const DEFAULT_MEETINGS: import('../types').Meeting[] = [
+  {
+    id: 'meet_1',
+    projectId: 'p1',
+    clientId: 'c1',
+    title: 'Consulenza Iniziale & Moodboard Partecipazioni',
+    date: '2026-10-28',
+    startTime: '15:00',
+    endTime: '16:30',
+    locationType: 'studio',
+    locationDetails: 'Atelier Sage Paper Studio · Via Roma 12',
+    status: 'scheduled',
+    attendees: 'Sofia & Marco (Sposi), Giulia',
+    notes: 'Gli sposi desiderano uno stile bucolico ed elegante, tonalità verde salvia e dettagli in oro caldo.\nVisionati campioni di carta cotone Amalfi e cartoncino Fedrigoni Materica.\nParticolare interesse per la busta foderata con carta fatta a mano e sigillo in ceralacca verde salvia.',
+    decisions: 'Palette concordata: Verde Salvia (#708871), Bianco Caldo Naturale e tocchi oro.\nFormato suite: Invito 12x18 sagomato ad arco + card RSVP + busta foderata.\nQuantità stimata: 85 partecipazioni nozze.',
+    actionItems: '1. Giulia prepara 2 proposte grafiche digitali entro venerdì.\n2. Sofia invia testi definitivi della cerimonia e coordinate lista nozze.\n3. Ordinare campioni ceralacca e carta cotone.',
+    createdAt: '2026-10-20',
+    updatedAt: '2026-10-20',
+  },
+  {
+    id: 'meet_2',
+    projectId: 'p2',
+    clientId: 'c2',
+    title: 'Revisione Bozze Coordinati Banchetto & Tableau',
+    date: '2026-11-04',
+    startTime: '17:00',
+    endTime: '18:00',
+    locationType: 'online',
+    locationDetails: 'Google Meet (meet.google.com/sage-elena-luca)',
+    status: 'scheduled',
+    attendees: 'Elena & Luca, Giulia',
+    notes: 'Incontro online per la verifica dell\'assegnazione tavoli e approvazione definitiva dei menù sagomati a onda.',
+    decisions: 'Tavoli nominati con erbe aromatiche. Cavalieri stampati fronte-retro.',
+    actionItems: 'Elena invia lista definitiva invitati con intolleranze alimentari per menù dedicati.',
+    createdAt: '2026-10-22',
+    updatedAt: '2026-10-22',
+  },
+];
+

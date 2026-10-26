@@ -6,14 +6,24 @@ import {
   InventoryItem,
   StudioSettings,
   TeamMember,
+  TeamMemberName,
   Task,
+  WeeklyAvailability,
   Proof,
   ProofFeedback,
   ProjectType,
   PriceCatalogItem,
   FinancialRecord,
+  Meeting,
 } from '../types';
-import { buildDefaultTasks, generateId, DEFAULT_PRICE_CATALOG, DEFAULT_FINANCIAL_RECORDS, generatePortalPassword } from '../lib/constants';
+import {
+  buildDefaultTasks,
+  generateId,
+  DEFAULT_PRICE_CATALOG,
+  DEFAULT_FINANCIAL_RECORDS,
+  DEFAULT_MEETINGS,
+  generatePortalPassword,
+} from '../lib/constants';
 import { computeBackwardPlans, TODAY_ISO, addDays, ComputedPlannerResult } from '../lib/plannerEngine';
 import { firestoreDb } from '../lib/firebase';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
@@ -58,6 +68,8 @@ interface StudioContextType {
   inventory: InventoryItem[];
   priceCatalog: PriceCatalogItem[];
   financials: FinancialRecord[];
+  meetings: Meeting[];
+  weeklyAvailability: WeeklyAvailability[];
   settings: StudioSettings;
   teamMembers: TeamMember[];
   plannerResult: ComputedPlannerResult;
@@ -73,6 +85,8 @@ interface StudioContextType {
   addTask: (projectId: string, task: Omit<Task, 'id'>) => void;
   updateTask: (projectId: string, taskId: string, updates: Partial<Task>) => void;
   deleteTask: (projectId: string, taskId: string) => void;
+  scheduleTask: (projectId: string, taskId: string, scheduledDate: string | null, scheduledOwner?: TeamMemberName, scheduledSlot?: 'mattina' | 'pomeriggio') => void;
+  setWeeklyAvailability: (item: WeeklyAvailability) => Promise<void>;
   approveProject: (projectId: string, approvedBy?: string) => void;
 
   // Proofs & Client Portal
@@ -106,6 +120,11 @@ interface StudioContextType {
   updateFinancialRecord: (id: string, updates: Partial<FinancialRecord>) => void;
   deleteFinancialRecord: (id: string) => void;
 
+  // Meetings & Couple Consultations (Meeting Sposi, Appunti & Google Calendar)
+  createMeeting: (meeting: Omit<Meeting, 'id' | 'createdAt' | 'updatedAt'>) => Meeting;
+  updateMeeting: (id: string, updates: Partial<Meeting>) => void;
+  deleteMeeting: (id: string) => void;
+
   // Toast notification
   toastMessage: string | null;
   showToast: (msg: string) => void;
@@ -130,6 +149,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [settings, setSettings] = useState<StudioSettings>(DEFAULT_SETTINGS);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>(DEFAULT_TEAM);
   const [financials, setFinancials] = useState<FinancialRecord[]>(DEFAULT_FINANCIAL_RECORDS);
+  const [meetings, setMeetings] = useState<Meeting[]>(DEFAULT_MEETINGS);
+  const [weeklyAvailability, setWeeklyAvailabilityState] = useState<WeeklyAvailability[]>([]);
 
   const [dbStatus, setDbStatus] = useState<'connected' | 'local_fallback' | 'error'>('connected');
   const [isSyncing, setIsSyncing] = useState<boolean>(true);
@@ -155,10 +176,13 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const settingsRef = useRef<StudioSettings>(DEFAULT_SETTINGS);
   const teamMembersRef = useRef<TeamMember[]>(DEFAULT_TEAM);
   const financialsRef = useRef<FinancialRecord[]>(DEFAULT_FINANCIAL_RECORDS);
+  const meetingsRef = useRef<Meeting[]>(DEFAULT_MEETINGS);
+  const weeklyAvailabilityRef = useRef<WeeklyAvailability[]>([]);
 
   const deletedProjectIdsRef = useRef<Set<string>>(new Set());
   const deletedClientIdsRef = useRef<Set<string>>(new Set());
   const deletedQuoteIdsRef = useRef<Set<string>>(new Set());
+  const deletedMeetingIdsRef = useRef<Set<string>>(new Set());
 
   // Keep refs in sync with state
   useEffect(() => { projectsRef.current = projects; }, [projects]);
@@ -169,6 +193,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => { teamMembersRef.current = teamMembers; }, [teamMembers]);
   useEffect(() => { financialsRef.current = financials; }, [financials]);
+  useEffect(() => { meetingsRef.current = meetings; }, [meetings]);
+  useEffect(() => { weeklyAvailabilityRef.current = weeklyAvailability; }, [weeklyAvailability]);
 
   // Instant real-time multi-browser sync dispatcher with deep undefined-stripping
   const syncToCloud = useCallback(
@@ -180,6 +206,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       priceCatalog?: PriceCatalogItem[];
       settings?: StudioSettings;
       financials?: FinancialRecord[];
+      meetings?: Meeting[];
     }) => {
       try {
         setIsSyncing(true);
@@ -190,6 +217,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const currentCatalog = overrideData?.priceCatalog ?? priceCatalogRef.current;
         const currentSettings = overrideData?.settings ?? settingsRef.current;
         const currentFinancials = overrideData?.financials ?? financialsRef.current;
+        const currentMeetings = overrideData?.meetings ?? meetingsRef.current;
 
         const rawPayload = {
           projects: currentProjects,
@@ -199,6 +227,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           priceCatalog: currentCatalog,
           settings: currentSettings,
           financials: currentFinancials,
+          meetings: currentMeetings,
           updatedAt: new Date().toISOString(),
         };
 
@@ -247,6 +276,14 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (Array.isArray(parsed.financials) && parsed.financials.length > 0) {
             setFinancials(parsed.financials);
             financialsRef.current = parsed.financials;
+          }
+          if (Array.isArray(parsed.meetings) && parsed.meetings.length > 0) {
+            setMeetings(parsed.meetings);
+            meetingsRef.current = parsed.meetings;
+          }
+          if (Array.isArray(parsed.weeklyAvailability)) {
+            setWeeklyAvailabilityState(parsed.weeklyAvailability);
+            weeklyAvailabilityRef.current = parsed.weeklyAvailability;
           }
           if (parsed.settings) {
             setSettings(parsed.settings);
@@ -325,6 +362,18 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               financialsRef.current = data.financials;
             }
 
+            if (Array.isArray(data.meetings)) {
+              const filtered = data.meetings.filter((m: any) => !deletedMeetingIdsRef.current.has(m.id));
+              const finalMeetings = filtered.length > 0 ? filtered : (meetingsRef.current.length > 0 ? meetingsRef.current : DEFAULT_MEETINGS);
+              setMeetings(finalMeetings);
+              meetingsRef.current = finalMeetings;
+            }
+
+            if (Array.isArray(data.weeklyAvailability)) {
+              setWeeklyAvailabilityState(data.weeklyAvailability);
+              weeklyAvailabilityRef.current = data.weeklyAvailability;
+            }
+
             if (data.settings) {
               setSettings(data.settings);
               settingsRef.current = data.settings;
@@ -347,6 +396,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                   settings: data.settings || DEFAULT_SETTINGS,
                   teamMembers: DEFAULT_TEAM,
                   financials: data.financials || [],
+                  meetings: meetingsRef.current,
+                  weeklyAvailability: data.weeklyAvailability || [],
                   updatedAt: new Date().toISOString(),
                 })
               );
@@ -387,6 +438,14 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               setFinancials(parsed.financials);
               financialsRef.current = parsed.financials;
             }
+            if (parsed.meetings?.length) {
+              setMeetings(parsed.meetings);
+              meetingsRef.current = parsed.meetings;
+            }
+            if (parsed.weeklyAvailability?.length) {
+              setWeeklyAvailabilityState(parsed.weeklyAvailability);
+              weeklyAvailabilityRef.current = parsed.weeklyAvailability;
+            }
             if (parsed.settings) {
               setSettings(parsed.settings);
               settingsRef.current = parsed.settings;
@@ -415,7 +474,9 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       newPriceCatalog?: PriceCatalogItem[],
       newSettings?: StudioSettings,
       newTeam?: TeamMember[],
-      newFinancials?: FinancialRecord[]
+      newFinancials?: FinancialRecord[],
+      newMeetings?: Meeting[],
+      newWeeklyAvailability?: WeeklyAvailability[]
     ) => {
       try {
         localStorage.setItem(
@@ -429,6 +490,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             settings: newSettings ?? settingsRef.current,
             teamMembers: newTeam ?? teamMembersRef.current,
             financials: newFinancials ?? financialsRef.current,
+            meetings: newMeetings ?? meetingsRef.current,
+            weeklyAvailability: newWeeklyAvailability ?? weeklyAvailabilityRef.current,
             updatedAt: new Date().toISOString(),
           })
         );
@@ -645,6 +708,87 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         .catch((e) => console.warn(e));
     },
     [persistLocalCache, syncToCloud]
+  );
+
+  const scheduleTask = useCallback(
+    (
+      projectId: string,
+      taskId: string,
+      scheduledDate: string | null,
+      scheduledOwner?: TeamMemberName,
+      scheduledSlot?: 'mattina' | 'pomeriggio'
+    ) => {
+      let taskName = '';
+      const updated = projectsRef.current.map((p) => {
+        if (p.id !== projectId) return p;
+        const newTasks = p.tasks.map((t) => {
+          if (t.id !== taskId) return t;
+          taskName = t.name;
+          return {
+            ...t,
+            scheduledDate: scheduledDate || undefined,
+            scheduledSlot: scheduledDate ? (scheduledSlot || t.scheduledSlot || 'mattina') : undefined,
+            scheduledOwner: scheduledOwner || t.scheduledOwner || t.owner,
+          };
+        });
+        return { ...p, tasks: newTasks, updatedAt: TODAY_ISO() };
+      });
+
+      projectsRef.current = updated;
+      setProjects(updated);
+      persistLocalCache(updated);
+      syncToCloud({ projects: updated });
+
+      fetch(`/api/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scheduledDate: scheduledDate || null,
+          scheduledSlot: scheduledDate ? (scheduledSlot || 'mattina') : null,
+          scheduledOwner: scheduledOwner || null,
+        }),
+      })
+        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
+        .catch((e) => console.warn(e));
+
+      if (scheduledDate) {
+        const slotLabel = scheduledSlot === 'pomeriggio' ? 'Pomeriggio' : 'Mattina';
+        showToast(`Attività "${taskName}" allocata: ${scheduledDate} (${slotLabel})${scheduledOwner ? ` a ${scheduledOwner}` : ''}`);
+      } else {
+        showToast(`Attività "${taskName}" riportata nel backlog non schedulato`);
+      }
+    },
+    [persistLocalCache, syncToCloud, showToast]
+  );
+
+  const setWeeklyAvailability = useCallback(
+    async (item: WeeklyAvailability) => {
+      const existing = weeklyAvailabilityRef.current;
+      const idx = existing.findIndex((w) => w.id === item.id);
+      let updated: WeeklyAvailability[];
+      if (idx >= 0) {
+        updated = [...existing];
+        updated[idx] = { ...updated[idx], ...item };
+      } else {
+        updated = [...existing, item];
+      }
+      weeklyAvailabilityRef.current = updated;
+      setWeeklyAvailabilityState(updated);
+      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
+
+      try {
+        await fetch('/api/weekly-availability', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item),
+        });
+        setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
+        showToast(`Disponibilità per ${item.id} salvata con successo`);
+      } catch (e) {
+        console.warn('Failed to save weekly availability to Cloud SQL:', e);
+      }
+    },
+    [persistLocalCache, showToast]
   );
 
   const approveProject = useCallback(
@@ -1092,6 +1236,74 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [financials, persistLocalCache, syncToCloud]
   );
 
+  // Meetings & Couple Consultations (Meeting Sposi & Google Calendar)
+  const createMeeting = useCallback(
+    (meetingData: Omit<Meeting, 'id' | 'createdAt' | 'updatedAt'>): Meeting => {
+      const newMeeting: Meeting = {
+        ...meetingData,
+        id: 'meet_' + generateId(),
+        createdAt: TODAY_ISO(),
+        updatedAt: TODAY_ISO(),
+      };
+      const updated = [newMeeting, ...meetingsRef.current];
+      meetingsRef.current = updated;
+      setMeetings(updated);
+      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ meetings: updated });
+      showToast(`✓ Incontro con gli sposi "${newMeeting.title}" salvato`);
+
+      fetch('/api/meetings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMeeting),
+      })
+        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
+        .catch((e) => console.error('Cloud SQL meeting insert error:', e));
+
+      return newMeeting;
+    },
+    [persistLocalCache, syncToCloud, showToast]
+  );
+
+  const updateMeeting = useCallback(
+    (id: string, updates: Partial<Meeting>) => {
+      const updated = meetingsRef.current.map((m) =>
+        m.id === id ? { ...m, ...updates, updatedAt: TODAY_ISO() } : m
+      );
+      meetingsRef.current = updated;
+      setMeetings(updated);
+      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ meetings: updated });
+      showToast(`✓ Appunti e note incontro aggiornati`);
+
+      fetch(`/api/meetings/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
+        .catch((e) => console.error('Cloud SQL meeting update error:', e));
+    },
+    [persistLocalCache, syncToCloud, showToast]
+  );
+
+  const deleteMeeting = useCallback(
+    (id: string) => {
+      deletedMeetingIdsRef.current.add(id);
+      const updated = meetingsRef.current.filter((m) => m.id !== id);
+      meetingsRef.current = updated;
+      setMeetings(updated);
+      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
+      syncToCloud({ meetings: updated });
+      showToast(`Incontro eliminato`);
+
+      fetch(`/api/meetings/${id}`, { method: 'DELETE' })
+        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
+        .catch((e) => console.error('Cloud SQL meeting delete error:', e));
+    },
+    [persistLocalCache, syncToCloud, showToast]
+  );
+
   // Settings
   const updateSettings = useCallback(
     (updates: Partial<StudioSettings>) => {
@@ -1218,6 +1430,11 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             settingsRef.current = data.settings;
           }
 
+          if (Array.isArray(data.weeklyAvailability)) {
+            setWeeklyAvailabilityState(data.weeklyAvailability);
+            weeklyAvailabilityRef.current = data.weeklyAvailability;
+          }
+
           setDbStatus('connected');
           const time = new Date().toLocaleTimeString('it-IT');
           setLastSyncedAt(time);
@@ -1236,6 +1453,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 settings: data.settings || DEFAULT_SETTINGS,
                 teamMembers: DEFAULT_TEAM,
                 financials: data.financials || [],
+                meetings: meetingsRef.current,
+                weeklyAvailability: data.weeklyAvailability || [],
                 updatedAt: new Date().toISOString(),
               })
             );
@@ -1261,6 +1480,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         inventory,
         priceCatalog,
         financials,
+        meetings,
+        weeklyAvailability,
         settings,
         teamMembers,
         plannerResult,
@@ -1276,6 +1497,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         addTask,
         updateTask,
         deleteTask,
+        scheduleTask,
+        setWeeklyAvailability,
         approveProject,
         addProof,
         updateProofStatus,
@@ -1296,6 +1519,9 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         createFinancialRecord,
         updateFinancialRecord,
         deleteFinancialRecord,
+        createMeeting,
+        updateMeeting,
+        deleteMeeting,
         updateSettings,
         connectSupabase,
         exportBackupJson,

@@ -416,6 +416,48 @@ app.delete('/api/finances/:id', async (req, res) => {
   }
 });
 
+// 11. Meetings & Couple Consultations (Incontri Sposi)
+app.post('/api/meetings', async (req, res) => {
+  try {
+    await queries.insertMeetingRecord(req.body);
+    res.status(201).json({ success: true, meeting: req.body });
+  } catch (err: any) {
+    console.error('API POST /api/meetings error:', err);
+    res.status(500).json({ error: 'Failed to insert meeting record' });
+  }
+});
+
+app.put('/api/meetings/:id', async (req, res) => {
+  try {
+    await queries.updateMeetingRecord(req.params.id, req.body);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('API PUT /api/meetings/:id error:', err);
+    res.status(500).json({ error: 'Failed to update meeting record' });
+  }
+});
+
+app.delete('/api/meetings/:id', async (req, res) => {
+  try {
+    await queries.deleteMeetingRecord(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('API DELETE /api/meetings/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete meeting record' });
+  }
+});
+
+// 12. Weekly Availability
+app.post('/api/weekly-availability', async (req, res) => {
+  try {
+    await queries.upsertWeeklyAvailabilityRecord(req.body);
+    res.json({ success: true, availability: req.body });
+  } catch (err: any) {
+    console.error('API POST /api/weekly-availability error:', err);
+    res.status(500).json({ error: 'Failed to update weekly availability' });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // VITE DEV SERVER / STATIC ASSETS MOUNT
 // ---------------------------------------------------------------------------
