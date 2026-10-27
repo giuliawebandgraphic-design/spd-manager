@@ -39,6 +39,7 @@ export const clients = pgTable('clients', {
   billingNotes: text('billing_notes'),
   fiscalDataCompleted: boolean('fiscal_data_completed').default(false),
   fiscalDataUpdatedAt: text('fiscal_data_updated_at'),
+  driveFolderUrl: text('drive_folder_url'),
 });
 
 // 3. Projects
@@ -54,6 +55,7 @@ export const projects = pgTable('projects', {
   due: text('due').notNull(),
   eventDate: text('event_date'),
   notes: text('notes').default(''),
+  driveFolderUrl: text('drive_folder_url'),
   approved: boolean('approved').notNull().default(false),
   approvedAt: text('approved_at'),
   approvedBy: text('approved_by'),
@@ -73,6 +75,9 @@ export const tasks = pgTable('tasks', {
   done: boolean('done').notNull().default(false),
   doneAt: text('done_at'),
   sortOrder: integer('sort_order').notNull().default(0),
+  scheduledDate: text('scheduled_date'),
+  scheduledSlot: text('scheduled_slot'), // 'mattina' | 'pomeriggio'
+  scheduledOwner: text('scheduled_owner'),
 });
 
 // 5. Proofs (Bozze con versioning per Portale Cliente)
@@ -175,6 +180,39 @@ export const financialRecords = pgTable('financial_records', {
   createdAt: text('created_at').notNull(),
 });
 
+// 13. Meetings & Consultations with Couples (Incontri Sposi & Appunti)
+export const meetings = pgTable('meetings', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').references(() => projects.id, { onDelete: 'set null' }),
+  clientId: text('client_id').references(() => clients.id, { onDelete: 'set null' }),
+  title: text('title').notNull(),
+  date: text('date').notNull(), // YYYY-MM-DD
+  startTime: text('start_time').notNull().default('10:00'),
+  endTime: text('end_time').default('11:00'),
+  locationType: text('location_type').notNull().default('studio'), // 'studio' | 'online' | 'location' | 'phone'
+  locationDetails: text('location_details'),
+  status: text('status').notNull().default('scheduled'), // 'scheduled' | 'completed' | 'cancelled'
+  attendees: text('attendees'),
+  notes: text('notes').default(''),
+  decisions: text('decisions').default(''),
+  actionItems: text('action_items').default(''),
+  googleCalendarEventId: text('google_calendar_event_id'),
+  googleCalendarLink: text('google_calendar_link'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+// 14. Weekly Availability (Disponibilità oraria Giulia & Claudia settimana per settimana)
+export const weeklyAvailability = pgTable('weekly_availability', {
+  id: text('id').primaryKey(), // weekKey, e.g. "2026-W44"
+  weekStart: text('week_start').notNull(), // YYYY-MM-DD del lunedì
+  giuliaHours: numeric('giulia_hours').notNull().default('30'),
+  claudiaHours: numeric('claudia_hours').notNull().default('4'),
+  giuliaDaily: text('giulia_daily'), // JSON { "2026-10-26": 6, ... }
+  claudiaDaily: text('claudia_daily'),
+  notes: text('notes').default(''),
+});
+
 // Relations
 export const projectsRelations = relations(projects, ({ one, many }) => ({
   client: one(clients, {
@@ -185,6 +223,18 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   proofs: many(proofs),
   quotes: many(quotes),
   financials: many(financialRecords),
+  meetings: many(meetings),
+}));
+
+export const meetingsRelations = relations(meetings, ({ one }) => ({
+  project: one(projects, {
+    fields: [meetings.projectId],
+    references: [projects.id],
+  }),
+  client: one(clients, {
+    fields: [meetings.clientId],
+    references: [clients.id],
+  }),
 }));
 
 export const tasksRelations = relations(tasks, ({ one }) => ({

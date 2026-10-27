@@ -24,13 +24,26 @@ import {
   ArrowDownLeft,
   Receipt,
   Check,
+  CalendarPlus,
+  Video,
+  MapPin,
+  Phone,
+  Building,
+  Copy,
+  CalendarDays,
+  BookmarkCheck,
+  ListTodo,
+  FolderGit2,
 } from 'lucide-react';
-import { Project, Task, ViewType, Client, FinancialRecord, TransactionType } from '../types';
+import { Project, Task, ViewType, Client, FinancialRecord, TransactionType, Meeting } from '../types';
 import { TYPE_NAMES, STATUS_NAMES, STATUS_TAGS, EXPENSE_CATEGORIES, REVENUE_CATEGORIES, EVENT_PRODUCTS_LIST } from '../lib/constants';
 import { formatDateIt, formatNumber, formatMoney, TODAY_ISO } from '../lib/plannerEngine';
 import { useStudio } from '../context/StudioContext';
 import { getGmailComposeUrl } from '../lib/gmail';
+import { isPdfUrl, isGoogleDriveLink } from '../lib/driveUtils';
 import { FinancialRecordModal } from './FinancialRecordModal';
+import { MeetingModal } from './MeetingModal';
+import { createGoogleMeetingCalendarLink } from '../lib/googleCalendar';
 
 interface ProjectDrawerProps {
   project: Project | null;
@@ -54,6 +67,10 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
     plannerResult,
     financials,
     quotes,
+    meetings,
+    deleteMeeting,
+    updateMeeting,
+    showToast,
     createFinancialRecord,
     updateFinancialRecord,
     deleteFinancialRecord,
@@ -68,11 +85,16 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
   const [proofFileUrl, setProofFileUrl] = useState('');
   const [showUploadForm, setShowUploadForm] = useState(false);
 
-  // Financial Tab & Modal State
-  const [activeDrawerTab, setActiveDrawerTab] = useState<'workflow' | 'finances'>('workflow');
+  // Tabs & Modals State
+  const [activeDrawerTab, setActiveDrawerTab] = useState<'workflow' | 'meetings' | 'finances'>('workflow');
   const [financeModalOpen, setFinanceModalOpen] = useState(false);
   const [editingFinanceRecord, setEditingFinanceRecord] = useState<FinancialRecord | null>(null);
   const [financeDefaultType, setFinanceDefaultType] = useState<TransactionType>('expense');
+
+  // Meeting Modal State
+  const [meetingModalOpen, setMeetingModalOpen] = useState(false);
+  const [editingMeeting, setEditingMeeting] = useState<Meeting | null>(null);
+  const [copiedMeetingId, setCopiedMeetingId] = useState<string | null>(null);
 
   if (!project) return null;
 
@@ -88,6 +110,49 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
 
   // Financial metrics for this project
   const projectFinancials = financials.filter((f) => f.projectId === project.id);
+  const projectMeetings = meetings.filter(
+    (m) => m.projectId === project.id || (project.clientId && m.clientId === project.clientId)
+  );
+
+  const handleCopyMeetingNotes = (m: Meeting) => {
+    const lines = [
+      `📋 RESOCONTO INCONTRO SPOSI · SAGE PAPER STUDIO`,
+      `📅 Data: ${m.date} ore ${m.startTime || '10:00'}`,
+      `💒 Incontro: ${m.title}`,
+      `💍 Progetto: ${project.name}`,
+      m.attendees ? `👥 Partecipanti: ${m.attendees}` : '',
+      m.locationDetails ? `📍 Luogo: ${m.locationDetails}` : '',
+      '',
+      m.notes ? `📝 APPUNTI & NOTE:\n${m.notes}\n` : '',
+      m.decisions ? `✨ SCELTE & DECISIONI CONCORDATE:\n${m.decisions}\n` : '',
+      m.actionItems ? `📌 PROSSIMI PASSI (TO-DO):\n${m.actionItems}\n` : '',
+      `Sage Paper Studio Manager - sagepaperdesign@gmail.com`,
+    ].filter(Boolean);
+
+    navigator.clipboard.writeText(lines.join('\n'));
+    setCopiedMeetingId(m.id);
+    showToast('✓ Appunti e resoconto copiati negli appunti!');
+    setTimeout(() => setCopiedMeetingId(null), 3000);
+  };
+
+  const handleOpenGCalMeeting = (m: Meeting) => {
+    const url = createGoogleMeetingCalendarLink({
+      title: m.title,
+      date: m.date,
+      startTime: m.startTime,
+      endTime: m.endTime,
+      locationType: m.locationType,
+      locationDetails: m.locationDetails,
+      attendees: m.attendees,
+      notes: m.notes,
+      decisions: m.decisions,
+      actionItems: m.actionItems,
+      clientName: client?.name,
+      projectName: project.name,
+    });
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   const totalRevenue = projectFinancials
     .filter((f) => f.type === 'revenue')
     .reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
@@ -151,21 +216,28 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
     e.preventDefault();
     if (!proofTitle.trim()) return;
 
+    const url = proofFileUrl.trim();
+    const isDrive = isGoogleDriveLink(url);
+    const isPdf = isPdfUrl(url, proofTitle);
+    const extension = isPdf ? '.pdf' : '.jpg';
+    const computedFileName = proofTitle.trim().replace(/\s+/g, '_') + (proofTitle.toLowerCase().endsWith('.pdf') ? '' : extension);
+
     addProof(project.id, {
       projectId: project.id,
       title: proofTitle.trim(),
       fileUrl:
-        proofFileUrl.trim() ||
+        url ||
         'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=1200&q=80',
-      fileName: `${proofTitle.trim().replace(/\s+/g, '_')}.pdf`,
-      fileSize: '3.8 MB',
+      fileName: computedFileName,
+      fileSize: isPdf ? '4.2 MB (PDF)' : '2.8 MB',
       uploadedBy: project.owner,
-      notes: 'Bozza caricata per revisione cliente.',
+      notes: isDrive ? 'Bozza caricata da Google Drive per revisione cliente.' : 'Bozza caricata per revisione cliente.',
     });
 
     setProofTitle('');
     setProofFileUrl('');
     setShowUploadForm(false);
+    showToast('✓ Nuova bozza caricata e resa disponibile per il cliente!');
   };
 
   return (
@@ -218,6 +290,18 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
                     <span>Scrivi su Gmail</span>
                   </a>
                 )}
+                {(project.driveFolderUrl || client?.driveFolderUrl) && (
+                  <a
+                    href={project.driveFolderUrl || client?.driveFolderUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#1a5fb4] bg-[#edf4fc] hover:bg-[#e1edfa] px-2 py-0.5 rounded-md border border-[#c5ddf6] transition-colors"
+                    title="Apri la cartella Google Drive con i file del cliente"
+                  >
+                    <FolderGit2 className="w-3 h-3 text-[#1a5fb4]" />
+                    <span>Cartella Drive ↗</span>
+                  </a>
+                )}
                 {client && (
                   client.fiscalDataCompleted ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#244d3b] bg-[#e7f3e8] px-2 py-0.5 rounded-md border border-[#c6e4cb]" title="Dati fiscali completati dal cliente">
@@ -256,8 +340,8 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
             </div>
           </div>
 
-          {/* Drawer Navigation Tabs: Fasi vs Finanze */}
-          <div className="grid grid-cols-2 p-1 bg-[#eef2ec] rounded-xl text-xs font-semibold mt-4">
+          {/* Drawer Navigation Tabs: Fasi vs Meeting Sposi vs Finanze */}
+          <div className="grid grid-cols-3 p-1 bg-[#eef2ec] rounded-xl text-xs font-semibold mt-4">
             <button
               type="button"
               onClick={() => setActiveDrawerTab('workflow')}
@@ -267,7 +351,20 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
                   : 'text-[#5d6e64] hover:text-[#263a32]'
               }`}
             >
-              <Layers className="w-3.5 h-3.5" /> Fasi & Bozze ({project.tasks.length})
+              <Layers className="w-3.5 h-3.5" />
+              <span className="truncate">Fasi ({project.tasks.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveDrawerTab('meetings')}
+              className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+                activeDrawerTab === 'meetings'
+                  ? 'bg-white text-[#244d3b] shadow-2xs font-bold'
+                  : 'text-[#5d6e64] hover:text-[#263a32]'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span className="truncate">Meeting ({projectMeetings.length})</span>
             </button>
             <button
               type="button"
@@ -278,7 +375,8 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
                   : 'text-[#5d6e64] hover:text-[#263a32]'
               }`}
             >
-              <DollarSign className="w-3.5 h-3.5" /> Finanze & Spese ({projectFinancials.length})
+              <DollarSign className="w-3.5 h-3.5" />
+              <span className="truncate">Finanze ({projectFinancials.length})</span>
             </button>
           </div>
         </div>
@@ -568,11 +666,14 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
                 />
                 <input
                   type="url"
-                  placeholder="URL immagine anteprima (opzionale)"
+                  placeholder="Link file PDF o bozza (Google Drive, Dropbox, URL diretto)..."
                   value={proofFileUrl}
                   onChange={(e) => setProofFileUrl(e.target.value)}
-                  className="w-full text-xs p-2 rounded-lg bg-white border border-[#e5e9e3]"
+                  className="w-full text-xs p-2 rounded-lg bg-white border border-[#e5e9e3] font-mono text-[11px]"
                 />
+                <p className="text-[10px] text-[#5d6e64] bg-[#edf2eb] p-1.5 rounded-md">
+                  💡 Incolla il link condivisibile di Google Drive o un link a file PDF: nel portale del cliente verrà visualizzata l'anteprima interattiva sfogliabile ad alta definizione.
+                </p>
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
@@ -640,6 +741,262 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
             </div>
           )}
         </>
+      ) : activeDrawerTab === 'meetings' ? (
+        /* MEETINGS & CONSULTATION TAB FOR THIS PROJECT */
+        <div className="space-y-4">
+          <div className="flex items-center justify-between pb-2 border-b border-[#eef2ec]">
+            <div>
+              <h4 className="font-serif text-sm font-bold text-[#263a32]">
+                Incontri & Consulenze Sposi
+              </h4>
+              <p className="text-[11px] text-[#78867d]">
+                Appunti dell'incontro, scelte di stationery e sincronizzazione Google Calendar
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingMeeting(null);
+                setMeetingModalOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-[#244d3b] hover:bg-[#1e3f30] text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Nuovo Incontro</span>
+            </button>
+          </div>
+
+          {projectMeetings.length === 0 ? (
+            <div className="p-8 rounded-2xl border border-dashed border-[#d6ddd3] bg-[#fafbf9] text-center space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-[#edf2eb] text-[#244d3b] flex items-center justify-center mx-auto">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div>
+                <h5 className="font-semibold text-xs text-[#263a32]">Nessun incontro registrato</h5>
+                <p className="text-[11px] text-[#78867d] max-w-sm mx-auto mt-0.5">
+                  Pianifica la prima consulenza con gli sposi per questo progetto per prendere appunti su desiderata, palette colori e inviare l'evento su Google Calendar.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingMeeting(null);
+                  setMeetingModalOpen(true);
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-[#244d3b] text-white text-xs font-semibold hover:bg-[#1e3f30] inline-flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Pianifica Incontro Sposi</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3.5">
+              {projectMeetings.map((m) => {
+                const isCompleted = m.status === 'completed';
+                const isCancelled = m.status === 'cancelled';
+                const isToday = m.date === TODAY_ISO();
+
+                return (
+                  <div
+                    key={m.id}
+                    className={`rounded-2xl border p-4 bg-white transition-all shadow-xs space-y-3 ${
+                      isToday
+                        ? 'border-[#244d3b] ring-1 ring-[#244d3b]/20'
+                        : isCompleted
+                        ? 'border-[#e2e7df] opacity-90'
+                        : 'border-[#e5e9e3] hover:border-[#ccd5c9]'
+                    }`}
+                  >
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#f0f3ee] pb-3">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-bold flex items-center gap-1 ${
+                              isToday ? 'bg-[#244d3b] text-white' : 'bg-[#edf2eb] text-[#244d3b]'
+                            }`}
+                          >
+                            <Calendar className="w-3 h-3" />
+                            <span>{formatDateIt(m.date)}</span>
+                          </span>
+
+                          <span className="px-2 py-0.5 rounded-md bg-white border border-[#e2e7df] text-[11px] font-medium text-[#55695d] flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-[#87968b]" />
+                            <span>{m.startTime}{m.endTime ? ` - ${m.endTime}` : ''}</span>
+                          </span>
+
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                              isCompleted
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : isCancelled
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {isCompleted ? '✓ Fatto' : isCancelled ? 'Annullato' : 'In programma'}
+                          </span>
+                        </div>
+
+                        <h5 className="font-serif text-sm font-bold text-[#263a32] pt-0.5">
+                          {m.title}
+                        </h5>
+
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#6b7b70]">
+                          <span className="flex items-center gap-1 font-medium text-[#244d3b]">
+                            {m.locationType === 'online' ? (
+                              <Video className="w-3 h-3 text-blue-600" />
+                            ) : m.locationType === 'location' ? (
+                              <MapPin className="w-3 h-3 text-amber-600" />
+                            ) : m.locationType === 'phone' ? (
+                              <Phone className="w-3 h-3 text-emerald-600" />
+                            ) : (
+                              <Building className="w-3 h-3 text-[#244d3b]" />
+                            )}
+                            <span>{m.locationDetails || (m.locationType === 'online' ? 'Google Meet' : 'Studio Sage Paper')}</span>
+                          </span>
+
+                          {m.attendees && (
+                            <span className="text-[#87968b]">· {m.attendees}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Card Action Buttons */}
+                      <div className="flex items-center gap-1.5 pt-1 sm:pt-0">
+                        {/* Google Calendar Link */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenGCalMeeting(m)}
+                          className="px-2.5 py-1 rounded-lg border border-[#244d3b]/30 bg-[#f7f9f6] hover:bg-[#edf2eb] text-[#244d3b] text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-colors"
+                          title="Aggiungi / Sincronizza questo incontro su Google Calendar con tutti gli appunti"
+                        >
+                          <CalendarPlus className="w-3.5 h-3.5 text-[#244d3b]" />
+                          <span>Google Calendar</span>
+                        </button>
+
+                        {/* Copy for couple */}
+                        <button
+                          type="button"
+                          onClick={() => handleCopyMeetingNotes(m)}
+                          className="p-1.5 rounded-lg border border-[#e2e7df] text-[#55695d] hover:bg-[#edf2eb] hover:text-[#244d3b] transition-colors"
+                          title="Copia resoconto e appunti per gli sposi"
+                        >
+                          {copiedMeetingId === m.id ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
+                        {/* Quick Toggle Status */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateMeeting(m.id, {
+                              status: isCompleted ? 'scheduled' : 'completed',
+                            })
+                          }
+                          className={`px-2 py-1 rounded-lg border text-[11px] font-semibold transition-colors ${
+                            isCompleted
+                              ? 'border-gray-200 text-gray-500 hover:bg-gray-100'
+                              : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          }`}
+                        >
+                          {isCompleted ? 'Riapri' : '✓ Fatto'}
+                        </button>
+
+                        {/* Edit */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingMeeting(m);
+                            setMeetingModalOpen(true);
+                          }}
+                          className="p-1.5 rounded-lg border border-[#e2e7df] text-[#55695d] hover:bg-[#edf2eb] hover:text-[#244d3b] transition-colors"
+                          title="Modifica appunti"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Delete */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`Eliminare l'incontro "${m.title}"?`)) {
+                              deleteMeeting(m.id);
+                            }
+                          }}
+                          className="p-1.5 rounded-lg text-[#9ea9a2] hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                          title="Elimina incontro"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Notes Content */}
+                    <div className="space-y-2 text-xs">
+                      {m.notes ? (
+                        <div className="bg-[#fafbf9] border border-[#edf2ea] rounded-xl p-3">
+                          <span className="block font-bold text-[#244d3b] text-[11px] mb-1">
+                            📝 Note & Appunti Incontro:
+                          </span>
+                          <p className="text-[#3b4b41] whitespace-pre-line leading-relaxed text-[11px]">
+                            {m.notes}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-[#8a968c] italic bg-[#fafbf9] rounded-lg p-2 text-center border border-dashed border-[#e5e9e3]">
+                          Nessun appunto registrato.{' '}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingMeeting(m);
+                              setMeetingModalOpen(true);
+                            }}
+                            className="text-[#244d3b] underline font-medium not-italic"
+                          >
+                            Scrivi appunti ora
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Decisions & To-Do */}
+                      {(m.decisions || m.actionItems) && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {m.decisions && (
+                            <div className="bg-[#f7f9f6] border border-[#e5ece2] rounded-xl p-2.5">
+                              <span className="block font-bold text-[#263a32] text-[10px] uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <BookmarkCheck className="w-3 h-3 text-[#244d3b]" />
+                                Scelte & Decisioni:
+                              </span>
+                              <p className="text-[#45574c] whitespace-pre-line text-[11px] leading-relaxed">
+                                {m.decisions}
+                              </p>
+                            </div>
+                          )}
+
+                          {m.actionItems && (
+                            <div className="bg-[#fffcf7] border border-[#f0e8d5] rounded-xl p-2.5">
+                              <span className="block font-bold text-[#8c6523] text-[10px] uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <ListTodo className="w-3 h-3 text-[#8c6523]" />
+                                Prossimi Passi (To-Do):
+                              </span>
+                              <p className="text-[#594723] whitespace-pre-line text-[11px] leading-relaxed">
+                                {m.actionItems}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       ) : (
         /* FINANCES TAB FOR PROJECT */
         <div className="space-y-5">
@@ -934,6 +1291,18 @@ export const ProjectDrawer: React.FC<ProjectDrawerProps> = ({
       record={editingFinanceRecord}
       defaultType={financeDefaultType}
       defaultProjectId={project.id}
+    />
+
+    {/* Meeting Modal for this project */}
+    <MeetingModal
+      isOpen={meetingModalOpen}
+      onClose={() => {
+        setMeetingModalOpen(false);
+        setEditingMeeting(null);
+      }}
+      meeting={editingMeeting}
+      defaultProjectId={project.id}
+      defaultClientId={project.clientId}
     />
   </div>
 </div>

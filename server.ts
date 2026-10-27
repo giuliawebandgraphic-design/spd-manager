@@ -1,27 +1,16 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as queries from './src/db/queries.ts';
-import { ensureDatabaseSchema } from './src/db/initialize.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
 app.use(express.json());
-
-// Vercel functions are ephemeral but Neon is not: initialise only the schema,
-// never seed or reset it. The promise is cached for warm function instances.
-app.use('/api', async (_req, _res, next) => {
-  try {
-    await ensureDatabaseSchema();
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
 
 // ---------------------------------------------------------------------------
 // CLOUD SQL POSTGRESQL REST API ROUTES
@@ -416,6 +405,48 @@ app.delete('/api/finances/:id', async (req, res) => {
   }
 });
 
+// 11. Meetings & Couple Consultations (Incontri Sposi)
+app.post('/api/meetings', async (req, res) => {
+  try {
+    await queries.insertMeetingRecord(req.body);
+    res.status(201).json({ success: true, meeting: req.body });
+  } catch (err: any) {
+    console.error('API POST /api/meetings error:', err);
+    res.status(500).json({ error: 'Failed to insert meeting record' });
+  }
+});
+
+app.put('/api/meetings/:id', async (req, res) => {
+  try {
+    await queries.updateMeetingRecord(req.params.id, req.body);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('API PUT /api/meetings/:id error:', err);
+    res.status(500).json({ error: 'Failed to update meeting record' });
+  }
+});
+
+app.delete('/api/meetings/:id', async (req, res) => {
+  try {
+    await queries.deleteMeetingRecord(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('API DELETE /api/meetings/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete meeting record' });
+  }
+});
+
+// 12. Weekly Availability
+app.post('/api/weekly-availability', async (req, res) => {
+  try {
+    await queries.upsertWeeklyAvailabilityRecord(req.body);
+    res.json({ success: true, availability: req.body });
+  } catch (err: any) {
+    console.error('API POST /api/weekly-availability error:', err);
+    res.status(500).json({ error: 'Failed to update weekly availability' });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // VITE DEV SERVER / STATIC ASSETS MOUNT
 // ---------------------------------------------------------------------------
@@ -439,9 +470,8 @@ async function startServer() {
   });
 }
 
-// A local `npm run dev` starts the HTTP server. On Vercel this file is imported
-// by the function handler, so it must not listen on a port itself.
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+// Start HTTP server in dev and standalone runtimes
+if (!process.env.VERCEL) {
   startServer();
 }
 

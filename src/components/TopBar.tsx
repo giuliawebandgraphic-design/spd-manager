@@ -13,6 +13,7 @@ interface TopBarProps {
 const VIEW_TITLES: Record<ViewType, [string, string]> = {
   dashboard: ['Il tuo studio, sotto controllo.', 'Una panoramica chiara del lavoro, giorno dopo giorno.'],
   projects: ['Ogni progetto, al suo posto.', 'Wedding, shop, produzione B2B e progetti digitali.'],
+  meetings: ['Incontri & Consulenze con gli Sposi.', 'Appunti approfonditi, scelte di stationery, decisioni e Google Calendar.'],
   planner: ['Tempo ben pianificato.', 'Simulazione automatica delle lavorazioni a ritroso dalle scadenze.'],
   production: ['Dalla bozza alla consegna.', 'Avanzamento delle fasi, gate di approvazione e taglio.'],
   clients: ['Le persone al centro.', 'Clienti privati e professionisti con cui collabori.'],

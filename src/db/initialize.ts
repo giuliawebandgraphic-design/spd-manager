@@ -84,13 +84,19 @@ const INITIAL_SCHEMA = `
 let schemaReady: Promise<void> | undefined;
 
 export function ensureDatabaseSchema(): Promise<void> {
+  // Cloud SQL schema is managed via Drizzle migrations (admin credentials).
+  // Standard app user has DML permissions only and cannot execute DDL CREATE TABLE statements.
+  if (process.env.SQL_HOST) {
+    return Promise.resolve();
+  }
+
   if (!schemaReady) {
     schemaReady = pool
       .query(INITIAL_SCHEMA)
       .then(() => undefined)
       .catch((error) => {
         schemaReady = undefined;
-        throw error;
+        console.warn('Neon database schema check notice:', error);
       });
   }
   return schemaReady;

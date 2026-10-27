@@ -24,7 +24,7 @@ import { useStudio } from '../context/StudioContext';
 interface SidebarProps {
   currentView: ViewType;
   onNavigate: (view: ViewType) => void;
-  onOpenNewModal: (kind: 'project' | 'client' | 'quote' | 'stock' | 'price_item' | 'transaction') => void;
+  onOpenNewModal: (kind: 'project' | 'client' | 'quote' | 'stock' | 'price_item' | 'transaction' | 'meeting') => void;
   isOpenMobile: boolean;
   onCloseMobile: () => void;
 }
@@ -36,12 +36,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile,
   onCloseMobile,
 }) => {
-  const { plannerResult, projects, priceCatalog, dbStatus } = useStudio();
+  const { plannerResult, projects, priceCatalog, dbStatus, meetings } = useStudio();
   const [newMenuOpen, setNewMenuOpen] = React.useState(false);
 
   const activeProjectsCount = projects.filter(
     (p) => p.status !== 'completed' && p.status !== 'paused'
   ).length;
+
+  const upcomingMeetingsCount = meetings
+    ? meetings.filter((m) => m.status === 'scheduled').length
+    : 0;
 
   const menuItems: Array<{ id: ViewType; label: string; icon: React.ReactNode; badge?: number | string; badgeColor?: string }> = [
     {
@@ -54,6 +58,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Progetti',
       icon: <FolderGit2 className="w-4 h-4" />,
       badge: activeProjectsCount,
+    },
+    {
+      id: 'meetings',
+      label: 'Meeting Sposi',
+      icon: <CalendarDays className="w-4 h-4" />,
+      badge: upcomingMeetingsCount > 0 ? upcomingMeetingsCount : undefined,
+      badgeColor: 'bg-[#edf2eb] text-[#244d3b]',
     },
     {
       id: 'planner',
@@ -154,6 +165,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <>
               <div className="fixed inset-0 z-10" onClick={() => setNewMenuOpen(false)} />
               <div className="absolute top-16 left-4 right-4 bg-white rounded-xl shadow-xl border border-[#e5e9e3] p-1.5 z-20 space-y-1">
+                <button
+                  onClick={() => {
+                    setNewMenuOpen(false);
+                    onOpenNewModal('meeting');
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-[#edf2eb] text-[#244d3b] flex items-center gap-2 font-semibold bg-[#f4f7f2]"
+                >
+                  <CalendarDays className="w-3.5 h-3.5 text-[#244d3b]" />
+                  Nuovo Incontro Sposi
+                </button>
                 <button
                   onClick={() => {
                     setNewMenuOpen(false);

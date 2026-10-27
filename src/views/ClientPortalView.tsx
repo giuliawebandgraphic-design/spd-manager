@@ -30,6 +30,7 @@ import {
   Building,
   FolderGit2,
   ChevronRight,
+  Plus,
 } from 'lucide-react';
 import { Client, Project, Proof } from '../types';
 import { formatDateIt, formatMoney, TODAY_ISO } from '../lib/plannerEngine';
@@ -37,6 +38,7 @@ import { TYPE_NAMES } from '../lib/constants';
 import { useStudio } from '../context/StudioContext';
 import { getGmailComposeUrl, STUDIO_GMAIL } from '../lib/gmail';
 import { ClientFiscalDataSection } from '../components/ClientFiscalDataSection';
+import { ProofPreviewViewer } from '../components/ProofPreviewViewer';
 
 interface ClientPortalViewProps {
   initialClientId?: string;
@@ -58,6 +60,9 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
     approveProject,
     updateProofStatus,
     addProofFeedback,
+    updateProject,
+    updateClient,
+    showToast,
   } = useStudio();
 
   // Active client being previewed/authenticated
@@ -68,6 +73,9 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
   const [feedbackText, setFeedbackText] = useState('');
   const [activeProofIndex, setActiveProofIndex] = useState(0);
   const [activePortalTab, setActivePortalTab] = useState<'project' | 'fiscal' | 'details'>('project');
+  const [isEditingDriveLink, setIsEditingDriveLink] = useState(false);
+  const [driveLinkInput, setDriveLinkInput] = useState('');
+  const [copiedDriveLink, setCopiedDriveLink] = useState(false);
 
   // In standalone mode, only match the specific client; never fall back to another client!
   const currentClient = isStandalone
@@ -121,6 +129,30 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
 
   const proofs = activeProject?.proofs || [];
   const currentProof = proofs[activeProofIndex] || proofs[0];
+
+  const effectiveDriveFolderUrl =
+    activeProject?.driveFolderUrl || currentClient?.driveFolderUrl || '';
+
+  const handleSaveDriveLink = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = driveLinkInput.trim();
+    if (activeProject) {
+      updateProject(activeProject.id, { driveFolderUrl: trimmed || undefined });
+    }
+    if (currentClient) {
+      updateClient(currentClient.id, { driveFolderUrl: trimmed || undefined });
+    }
+    showToast('✓ Link cartella Google Drive salvato con successo!');
+    setIsEditingDriveLink(false);
+  };
+
+  const handleCopyDriveLink = () => {
+    if (!effectiveDriveFolderUrl) return;
+    navigator.clipboard.writeText(effectiveDriveFolderUrl);
+    setCopiedDriveLink(true);
+    showToast('✓ Link cartella Google Drive copiato negli appunti!');
+    setTimeout(() => setCopiedDriveLink(false), 2500);
+  };
 
   const handleFormalApproval = (e: React.FormEvent) => {
     e.preventDefault();
@@ -624,6 +656,37 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
                 </div>
               </div>
 
+              {/* Google Drive Shared Folder Card in Client Details */}
+              {effectiveDriveFolderUrl && (
+                <div className="mt-4 p-4 rounded-2xl bg-[#f4f8fd] border border-[#d2e2f6] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-[#1b5fa8] text-white flex items-center justify-center shrink-0">
+                      <FolderGit2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-[#1b5fa8] flex items-center gap-1.5">
+                        <span>Cartella Google Drive Condivisa con il Cliente</span>
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-[#e1edfa] text-[#1b5fa8]">
+                          Drive Cloud
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#4a6b8c] mt-0.5">
+                        Bozze PDF ad alta risoluzione, immagini, formati grafici e materiali del progetto.
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={effectiveDriveFolderUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 rounded-xl bg-[#1b5fa8] hover:bg-[#154c87] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-2xs shrink-0"
+                  >
+                    <FolderGit2 className="w-3.5 h-3.5" />
+                    <span>Apri Cartella Drive ↗</span>
+                  </a>
+                </div>
+              )}
+
               {/* Laboratory notes & style preferences */}
               {currentClient.notes && (
                 <div className="mt-4 p-4 rounded-2xl bg-[#f8faf6] border border-[#dce8db] text-xs">
@@ -862,6 +925,128 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
             </div>
           </div>
 
+          {/* Cartella Condivisa Google Drive Card */}
+          <div className="p-5 sm:p-6 bg-gradient-to-br from-white via-[#f7fbf8] to-[#edf5ee] rounded-2xl border border-[#d6e5d5] shadow-xs">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-[#244d3b] text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <FolderGit2 className="w-5 h-5 text-[#cce5d2]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#edf2eb] text-[#244d3b] uppercase tracking-wider">
+                      Google Drive Cloud
+                    </span>
+                    {effectiveDriveFolderUrl ? (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#e3f4e5] text-[#244d3b]">
+                        ✓ Cartella Condivisa Attiva
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-[#fafbf9] text-[#78867d] border border-[#e5e9e3]">
+                        Cartella in preparazione
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="font-serif text-lg sm:text-xl font-normal text-[#21362d] mt-1">
+                    Cartella Condivisa Google Drive
+                  </h3>
+                  <p className="text-xs text-[#5d6e64] max-w-xl mt-0.5 leading-relaxed">
+                    Accedi all'archivio cloud su Google Drive con tutti i file esecutivi, le bozze in formato PDF ad alta definizione per la stampa, foto e materiali grafici concordati con lo studio.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                {effectiveDriveFolderUrl ? (
+                  <>
+                    <a
+                      href={effectiveDriveFolderUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2.5 rounded-xl bg-[#244d3b] hover:bg-[#1a3a2c] text-white text-xs font-bold flex items-center gap-2 shadow-xs transition-colors"
+                      title="Apri la cartella Google Drive in una nuova scheda"
+                    >
+                      <FolderGit2 className="w-4 h-4" />
+                      <span>Apri Cartella Drive ↗</span>
+                    </a>
+                    <button
+                      onClick={handleCopyDriveLink}
+                      className="p-2.5 rounded-xl bg-white border border-[#ccd9cc] hover:bg-[#f2f7f2] text-[#244d3b] text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs"
+                      title="Copia link cartella Drive"
+                    >
+                      {copiedDriveLink ? <Check className="w-4 h-4 text-[#296839]" /> : <Copy className="w-4 h-4" />}
+                      <span className="hidden sm:inline">{copiedDriveLink ? 'Copiato!' : 'Copia link'}</span>
+                    </button>
+                    {!isStandalone && (
+                      <button
+                        onClick={() => {
+                          setDriveLinkInput(effectiveDriveFolderUrl);
+                          setIsEditingDriveLink(true);
+                        }}
+                        className="p-2.5 rounded-xl bg-white/80 border border-[#d6e3d6] hover:bg-white text-[#5d6e64] text-xs font-medium transition-colors"
+                        title="Modifica link cartella Google Drive (Staff Studio)"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  !isStandalone ? (
+                    <button
+                      onClick={() => {
+                        setDriveLinkInput('');
+                        setIsEditingDriveLink(true);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-[#244d3b] hover:bg-[#1a3a2c] text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Imposta Link Cartella Drive</span>
+                    </button>
+                  ) : (
+                    <span className="text-xs text-[#78867d] italic bg-white/70 px-3 py-2 rounded-xl border border-[#e5e9e3]">
+                      Cartella condivisa in preparazione dallo studio
+                    </span>
+                  )
+                )}
+              </div>
+            </div>
+
+            {/* Inline Editor for Studio Staff */}
+            {isEditingDriveLink && !isStandalone && (
+              <form onSubmit={handleSaveDriveLink} className="mt-4 pt-4 border-t border-[#d8e6d7] space-y-2 animate-in fade-in duration-150">
+                <div className="flex items-center justify-between text-xs font-bold text-[#244d3b]">
+                  <span>Configurazione Cartella Google Drive per {activeProject?.name || currentClient?.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingDriveLink(false)}
+                    className="text-[#78867d] hover:text-[#21362d] font-normal"
+                  >
+                    Annulla
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="url"
+                    value={driveLinkInput}
+                    onChange={(e) => setDriveLinkInput(e.target.value)}
+                    placeholder="https://drive.google.com/drive/folders/..."
+                    className="flex-1 text-xs p-2.5 rounded-xl bg-white border border-[#ccd9cc] focus:outline-hidden focus:border-[#244d3b] font-mono"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 rounded-xl bg-[#244d3b] hover:bg-[#1b3d2e] text-white text-xs font-bold shrink-0 transition-colors shadow-2xs"
+                  >
+                    Salva Link Drive
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#5d6e64]">
+                  💡 Inserisci il link alla cartella Google Drive con i permessi di visualizzazione per il cliente.
+                </p>
+              </form>
+            )}
+          </div>
+
           {/* Proofs & Feedback Section */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Left: Proof Preview Gallery */}
@@ -898,30 +1083,8 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
 
                 {currentProof ? (
                   <div className="space-y-4">
-                    {/* Mockup Preview Card */}
-                    <div className="rounded-2xl border border-[#e5e9e3] bg-[#fafbf9] p-4 flex flex-col items-center justify-center">
-                      <div className="relative w-full max-h-[380px] rounded-xl overflow-hidden shadow-md flex items-center justify-center bg-white">
-                        <img
-                          src={currentProof.fileUrl}
-                          alt={currentProof.title}
-                          className="w-full h-auto object-cover max-h-[380px]"
-                        />
-                      </div>
-
-                      <div className="w-full flex items-center justify-between mt-3 text-xs text-[#5d6e64]">
-                        <span className="font-semibold text-[#21362d]">
-                          {currentProof.title} (v{currentProof.version})
-                        </span>
-                        <a
-                          href={currentProof.fileUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 text-[#244d3b] hover:underline font-bold"
-                        >
-                          <Download className="w-3.5 h-3.5" /> Scarica file alta risoluzione
-                        </a>
-                      </div>
-                    </div>
+                    {/* Interactive PDF & Graphic Proof Preview Viewer */}
+                    <ProofPreviewViewer proof={currentProof} />
 
                     {currentProof.notes && (
                       <div className="p-3 bg-[#f8faf6] rounded-xl border border-[#e8ece7] text-xs text-[#556b5b]">
