@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { Client, Project } from '../types';
 import { useStudio } from '../context/StudioContext';
-import { generateId } from '../lib/constants';
+import { generateId, generatePortalPassword } from '../lib/constants';
 import { getGmailComposeUrl, openGmail } from '../lib/gmail';
 
 interface SharePortalModalProps {
@@ -53,12 +53,31 @@ export const SharePortalModal: React.FC<SharePortalModalProps> = ({
   const [customNote, setCustomNote] = useState('');
   const [isRegenerating, setIsRegenerating] = useState(false);
 
+  // Password e token impostati in questa finestra (il prop `client` è una copia
+  // presa all'apertura e non si aggiorna da solo).
+  const [assignedPassword, setAssignedPassword] = useState<string | null>(null);
+  const [assignedToken, setAssignedToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAssignedPassword(null);
+    setAssignedToken(null);
+  }, [client?.id]);
+
+  // Il server non ammette accessi senza password: se il cliente non ne ha una, la si crea ora.
+  useEffect(() => {
+    if (isOpen && client && !client.portalPassword && !assignedPassword) {
+      const newPwd = generatePortalPassword(client.name);
+      setAssignedPassword(newPwd);
+      updateClient(client.id, { portalPassword: newPwd });
+    }
+  }, [isOpen, client, assignedPassword, updateClient]);
+
   // Derive portal link
   const portalUrl = client
-    ? `${window.location.origin}/#portal?token=${client.portalToken}`
+    ? `${window.location.origin}/#portal?token=${assignedToken || client.portalToken}`
     : '';
 
-  const clientPassword = client?.portalPassword || 'SP-' + (client?.name?.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'SAGE') + '-2026';
+  const clientPassword = assignedPassword || client?.portalPassword || '';
 
   // Preset message templates with link and assigned password
   const getPresetMessage = () => {
@@ -101,6 +120,7 @@ export const SharePortalModal: React.FC<SharePortalModalProps> = ({
   const handleRegeneratePassword = () => {
     if (!client) return;
     const newPwd = 'SP-' + (client.name.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'SP') + '-' + Math.floor(1000 + Math.random() * 9000);
+    setAssignedPassword(newPwd);
     updateClient(client.id, { portalPassword: newPwd });
   };
 
@@ -141,6 +161,7 @@ export const SharePortalModal: React.FC<SharePortalModalProps> = ({
     ) {
       setIsRegenerating(true);
       const newToken = 'tok_' + generateId() + Math.random().toString(36).substring(2, 7);
+      setAssignedToken(newToken);
       updateClient(client.id, { portalToken: newToken });
       setTimeout(() => {
         setIsRegenerating(false);

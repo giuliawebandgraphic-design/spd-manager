@@ -205,7 +205,7 @@ export const PlannerView: React.FC<PlannerViewProps> = ({ onSelectProject }) => 
     setWeekNotes(existingWeekRecord?.notes ?? '');
   }, [existingWeekRecord, mondayIso]);
 
-  // Save weekly shifts availability to Cloud SQL
+  // Salva la disponibilità settimanale sul server
   const handleSaveAvailability = useCallback(
     async (
       customGiulia?: Record<string, DayShiftState>,

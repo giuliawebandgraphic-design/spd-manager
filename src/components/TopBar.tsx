@@ -22,7 +22,7 @@ const VIEW_TITLES: Record<ViewType, [string, string]> = {
   finances: ['Bilancio & Finanze dello Studio.', 'Gestione spese, entrate, utile netto, riepilogo mensile e bilancio annuo.'],
   inventory: ['Materiali sotto controllo.', 'Scorte carte pregiate, buste, nastri e soglie di riordino.'],
   portal: ['Portale Cliente Protetto.', 'Accesso riservato per visualizzazione bozze, feedback e approvazione.'],
-  settings: ['Configurazione Studio & Cloud.', 'Capacità Giulia & Claudia, parametri economici, Cloud SQL e Google Calendar.'],
+  settings: ['Configurazione Studio & Cloud.', 'Capacità Giulia & Claudia, parametri economici, database e Google Calendar.'],
 };
 
 export const TopBar: React.FC<TopBarProps> = ({

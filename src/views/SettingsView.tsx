@@ -7,29 +7,23 @@ import {
   Upload,
   CheckCircle2,
   AlertTriangle,
-  Copy,
-  Check,
-  RotateCcw,
-  Sparkles,
-  Shield,
-  Key,
   ExternalLink,
   RefreshCw,
+  LogOut,
+  UserCircle2,
 } from 'lucide-react';
-import { SUPABASE_SQL_SCHEMA } from '../db/schemaSql';
 import { useStudio } from '../context/StudioContext';
 import { downloadICalendarFile } from '../lib/googleCalendar';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { useAuth } from '../context/AuthContext';
+import { apiBaseUrl } from '../lib/api';
 
 export const SettingsView: React.FC = () => {
   const {
     settings,
     updateSettings,
     dbStatus,
-    connectSupabase,
     exportBackupJson,
     importBackupJson,
-    resetStudioData,
     clients,
     quotes,
     inventory,
@@ -41,6 +35,7 @@ export const SettingsView: React.FC = () => {
     projects,
     plannerResult,
   } = useStudio();
+  const { user, logout } = useAuth();
 
   // Settings form state
   const [ownerHours, setOwnerHours] = useState(settings.ownerHours || 30);
@@ -51,21 +46,9 @@ export const SettingsView: React.FC = () => {
   const [savedSettingsSuccess, setSavedSettingsSuccess] = useState(false);
   const [refreshSuccess, setRefreshSuccess] = useState(false);
 
-  // Supabase connection state
-  const [supabaseUrl, setSupabaseUrl] = useState(import.meta.env.VITE_SUPABASE_URL || '');
-  const [supabaseKey, setSupabaseKey] = useState(import.meta.env.VITE_SUPABASE_ANON_KEY || '');
-  const [testingDb, setTestingDb] = useState(false);
-  const [dbMessage, setDbMessage] = useState<{ text: string; ok: boolean } | null>(null);
-  const [showSqlSchema, setShowSqlSchema] = useState(false);
-  const [copiedSql, setCopiedSql] = useState(false);
-
-  // Google Calendar state
-  const [googleClientId, setGoogleClientId] = useState(
-    import.meta.env.VITE_GOOGLE_CLIENT_ID || (firebaseConfig as any)?.oAuthClientId || ''
-  );
-
   // Backup import
-  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const handleManualSync = async () => {
     const ok = await refreshFromDatabase();
@@ -88,20 +71,6 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setSavedSettingsSuccess(false), 2500);
   };
 
-  const handleTestSupabase = async () => {
-    setTestingDb(true);
-    setDbMessage(null);
-    const res = await connectSupabase(supabaseUrl.trim(), supabaseKey.trim());
-    setTestingDb(false);
-    setDbMessage({ text: res.message, ok: res.success });
-  };
-
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2500);
-  };
-
   const handleDownloadBackup = () => {
     const jsonStr = exportBackupJson();
     const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -117,18 +86,17 @@ export const SettingsView: React.FC = () => {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    if (!confirm('Ripristinare questo backup sul server? I record con lo stesso id verranno sovrascritti.')) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      const success = importBackupJson(content);
-      if (success) {
-        setImportStatus('Backup ripristinato con successo!');
-      } else {
-        setImportStatus('Errore: formato JSON non valido.');
-      }
-      setTimeout(() => setImportStatus(null), 3000);
+    reader.onload = async (event) => {
+      setImporting(true);
+      const result = await importBackupJson(event.target?.result as string);
+      setImporting(false);
+      setImportStatus(result);
+      setTimeout(() => setImportStatus(null), 6000);
     };
     reader.readAsText(file);
   };
@@ -265,7 +233,7 @@ export const SettingsView: React.FC = () => {
         </form>
       </div>
 
-      {/* 2. Cloud SQL PostgreSQL Database Integration */}
+      {/* 2. Server API Laravel + MySQL */}
       <div className="p-6 bg-white rounded-2xl border border-[#e5e9e3] shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -273,19 +241,23 @@ export const SettingsView: React.FC = () => {
               <Database className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-serif text-xl font-normal text-[#21362d]">
-                Database Relazionale Cloud SQL (PostgreSQL)
-              </h3>
+              <h3 className="font-serif text-xl font-normal text-[#21362d]">Database dello Studio</h3>
               <p className="text-xs text-[#78867d]">
-                Persistenza cloud continua: tutti i dati sono memorizzati in modo permanente e sempre consultabili
+                Tutti i dati sono salvati sul server dello studio (API Laravel · database MySQL)
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-[#e7f3e8] text-[#2e593d]">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> PostgreSQL Live Connesso
-            </span>
+            {dbStatus === 'connected' ? (
+              <span className="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-[#e7f3e8] text-[#2e593d]">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Server connesso
+              </span>
+            ) : (
+              <span className="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-[#fdf0ed] text-[#b76258]">
+                <AlertTriangle className="w-3.5 h-3.5" /> Server non raggiungibile
+              </span>
+            )}
             <button
               type="button"
               onClick={handleManualSync}
@@ -293,7 +265,7 @@ export const SettingsView: React.FC = () => {
               className="px-3 py-1.5 rounded-xl bg-[#244d3b] hover:bg-[#1e3f30] text-white text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Sincronizzazione...' : 'Sincronizza / Consulta Ora'}</span>
+              <span>{isSyncing ? 'Sincronizzazione...' : 'Ricarica dal server'}</span>
             </button>
           </div>
         </div>
@@ -301,15 +273,9 @@ export const SettingsView: React.FC = () => {
         {refreshSuccess && (
           <div className="p-3 bg-[#e7f3e8] border border-[#c4e2c6] text-[#295e38] text-xs font-semibold rounded-xl flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>Database sincronizzato con successo alle {lastSyncedAt || new Date().toLocaleTimeString('it-IT')}! Tutti i record sono allineati.</span>
+            <span>Dati ricaricati dal server alle {lastSyncedAt || new Date().toLocaleTimeString('it-IT')}.</span>
           </div>
         )}
-
-        <p className="text-xs text-[#5d6e64] leading-relaxed">
-          Il database <strong>Cloud SQL PostgreSQL</strong> è collegato e operativo. Tutte le modifiche apportate ai
-          progetti, alle checklist di produzione, alle bozze del portale cliente, ai preventivi, alle giacenze del magazzino e alle registrazioni finanziarie (spese ed entrate) vengono
-          salvate direttamente in PostgreSQL, garantendo che il database rimanga <strong>costantemente aggiornato e consultabile in qualsiasi momento</strong>.
-        </p>
 
         {/* Live Database Record Counters */}
         <div className="space-y-2">
@@ -348,56 +314,32 @@ export const SettingsView: React.FC = () => {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-[#fafbf9] rounded-xl border border-[#eef2ec] text-xs">
           <div>
-            <span className="text-[10px] uppercase font-bold text-[#8a968c] block">Motore Database</span>
-            <strong className="text-[#21362d]">PostgreSQL 16 (Cloud SQL)</strong>
+            <span className="text-[10px] uppercase font-bold text-[#8a968c] block">Server API</span>
+            <strong className="text-[#21362d] break-all">{apiBaseUrl()}</strong>
           </div>
           <div>
-            <span className="text-[10px] uppercase font-bold text-[#8a968c] block">Regione di Deploy</span>
-            <strong className="text-[#21362d]">europe-west1 (Belgio)</strong>
+            <span className="text-[10px] uppercase font-bold text-[#8a968c] block">Ultimo salvataggio</span>
+            <strong className="text-[#21362d]">{lastSyncedAt ? `Alle ${lastSyncedAt}` : '—'}</strong>
           </div>
           <div>
-            <span className="text-[10px] uppercase font-bold text-[#8a968c] block">Stato Sincronizzazione</span>
-            <strong className="text-[#21362d] flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              {lastSyncedAt ? `Aggiornato alle ${lastSyncedAt}` : 'In linea'}
-            </strong>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-          <button
-            onClick={() => setShowSqlSchema(!showSqlSchema)}
-            className="text-xs font-bold text-[#244d3b] hover:underline"
-          >
-            {showSqlSchema ? '▲ Nascondi Schema SQL & DDL' : '▼ Visualizza Schema SQL Completo & Tabelle'}
-          </button>
-        </div>
-
-        {/* SQL Schema Accordion */}
-        {showSqlSchema && (
-          <div className="mt-4 p-4 bg-[#1f2923] text-[#e0e7e1] rounded-2xl text-[11px] font-mono overflow-hidden space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[#a4c0a8] font-bold">Schema SQL PostgreSQL con RLS:</span>
+            <span className="text-[10px] uppercase font-bold text-[#8a968c] block">Account</span>
+            <div className="flex items-center justify-between gap-2">
+              <strong className="text-[#21362d] flex items-center gap-1 min-w-0">
+                <UserCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">
+                  {user.name} · {user.role === 'owner' ? 'Titolare' : 'Collaboratrice'}
+                </span>
+              </strong>
               <button
-                onClick={handleCopySql}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#2e4034] hover:bg-[#3b5443] text-white text-xs font-sans transition-colors"
+                type="button"
+                onClick={() => logout()}
+                className="text-[11px] font-semibold text-[#b76258] hover:underline flex items-center gap-1 shrink-0"
               >
-                {copiedSql ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" /> Copiato!
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" /> Copia Schema SQL
-                  </>
-                )}
+                <LogOut className="w-3 h-3" /> Esci
               </button>
             </div>
-            <pre className="max-h-72 overflow-y-auto whitespace-pre p-2 bg-[#171f1a] rounded-xl text-[10px] leading-relaxed text-[#c3d1c5]">
-              {SUPABASE_SQL_SCHEMA}
-            </pre>
           </div>
-        )}
+        </div>
       </div>
 
       {/* 3. Google Calendar OAuth & Sync */}
@@ -455,14 +397,20 @@ export const SettingsView: React.FC = () => {
               Salvataggio & Backup Dati
             </h3>
             <p className="text-xs text-[#78867d]">
-              Esporta o ripristina tutti i progetti, clienti, preventivi e magazzino in formato JSON
+              Esporta una copia JSON dei dati, oppure ripristinala sul server (solo titolare)
             </p>
           </div>
         </div>
 
         {importStatus && (
-          <div className="p-3 bg-[#e7f3e8] border border-[#c4e2c6] text-[#295e38] text-xs font-semibold rounded-xl">
-            {importStatus}
+          <div
+            className={`p-3 border text-xs font-semibold rounded-xl ${
+              importStatus.ok
+                ? 'bg-[#e7f3e8] border-[#c4e2c6] text-[#295e38]'
+                : 'bg-[#fdf0ed] border-[#f3cfc7] text-[#b76258]'
+            }`}
+          >
+            {importStatus.message}
           </div>
         )}
 
@@ -476,20 +424,10 @@ export const SettingsView: React.FC = () => {
 
           <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#e5e9e3] bg-[#fafbf9] hover:bg-[#edf2eb] text-[#263a32] text-xs font-semibold cursor-pointer">
             <Upload className="w-4 h-4 text-[#68816e]" />
-            <span>Importa Backup JSON</span>
-            <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
+            <span>{importing ? 'Ripristino in corso…' : 'Ripristina Backup JSON'}</span>
+            <input type="file" accept=".json" onChange={handleFileUpload} disabled={importing} className="hidden" />
           </label>
 
-          <button
-            onClick={() => {
-              if (confirm('Ripristinare i dati iniziali di Sage Paper Design? Tutti i dati locali verranno sostituiti.')) {
-                resetStudioData();
-              }
-            }}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#f3cfc7] text-[#b76258] hover:bg-[#fdf0ed] text-xs font-semibold ml-auto"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> Ripristina Esempi Studio
-          </button>
         </div>
       </div>
     </div>

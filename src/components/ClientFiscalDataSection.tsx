@@ -14,7 +14,7 @@ import {
   Info,
 } from 'lucide-react';
 import { Client, FiscalPersonType } from '../types';
-import { useStudio } from '../context/StudioContext';
+import { usePortal } from '../context/PortalContext';
 import { TODAY_ISO, formatDateIt } from '../lib/plannerEngine';
 
 interface ClientFiscalDataSectionProps {
@@ -28,7 +28,7 @@ export const ClientFiscalDataSection: React.FC<ClientFiscalDataSectionProps> = (
   readOnly = false,
   onSaved,
 }) => {
-  const { updateClient } = useStudio();
+  const { updateClient } = usePortal();
 
   const [fiscalType, setFiscalType] = useState<FiscalPersonType>(
     client.fiscalType ||
