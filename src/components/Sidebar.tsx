@@ -287,12 +287,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {dbStatus === 'connected' ? (
                 <>
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  PostgreSQL Live
+                  Server MySQL
                 </>
               ) : (
                 <>
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  Local-First DB
+                  Server non raggiungibile
                 </>
               )}
             </span>

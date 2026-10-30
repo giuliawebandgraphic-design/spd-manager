@@ -246,7 +246,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   </span>
                   <span className="inline-flex items-center gap-1 font-mono text-[11px] font-bold text-[#244d3b] bg-[#edf2eb] px-2 py-0.5 rounded-md border border-[#d5e2d3]" title="Password assegnata al cliente per accedere al portale">
                     <Lock className="w-2.5 h-2.5" />
-                    {client.portalPassword || 'SP-2026'}
+                    {client.portalPassword || 'Nessuna password'}
                   </span>
                 </div>
 

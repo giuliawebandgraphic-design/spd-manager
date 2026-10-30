@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { AuthGate } from './context/AuthContext';
+import { ClientPortalSession, StaffPortalBridge } from './context/PortalContext';
 import { ViewType, Project, Client, Quote, InventoryItem, Task, PriceCatalogItem, FinancialRecord, Meeting } from './types';
 import { StudioProvider, useStudio } from './context/StudioContext';
 import { Sidebar } from './components/Sidebar';
@@ -28,15 +30,14 @@ import { InventoryView } from './views/InventoryView';
 import { ClientPortalView } from './views/ClientPortalView';
 import { SettingsView } from './views/SettingsView';
 
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, Loader2 } from 'lucide-react';
 
 const StudioAppContent: React.FC = () => {
-  const { projects, clients, toastMessage } = useStudio();
+  const { projects, toastMessage, isLoaded } = useStudio();
 
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [isStandalonePortal, setIsStandalonePortal] = useState(false);
 
   // Drawer & Client Portal selection
   const [drawerProject, setDrawerProject] = useState<Project | null>(null);
@@ -74,38 +75,6 @@ const StudioAppContent: React.FC = () => {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareClient, setShareClient] = useState<Client | null>(null);
   const [shareProject, setShareProject] = useState<Project | null>(null);
-
-  // Hash-based routing check for direct client portal sharing links
-  useEffect(() => {
-    const handleHash = () => {
-      const hash = window.location.hash;
-      if (hash.startsWith('#portal')) {
-        setCurrentView('portal');
-        const tokenMatch = hash.match(/token=([^&]+)/);
-        if (tokenMatch && tokenMatch[1]) {
-          const foundClient = clients.find((c) => c.portalToken === tokenMatch[1]);
-          if (foundClient) {
-            setPortalClientId(foundClient.id);
-            setIsStandalonePortal(true);
-          } else if (clients.length > 0) {
-            // Clients are loaded but token does not match any client
-            setPortalClientId('UNAUTHORIZED');
-            setIsStandalonePortal(true);
-          }
-        } else {
-          // No token provided in standalone portal hash -> unauthorized
-          setPortalClientId('UNAUTHORIZED');
-          setIsStandalonePortal(true);
-        }
-      } else {
-        setIsStandalonePortal(false);
-      }
-    };
-
-    handleHash();
-    window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
-  }, [clients]);
 
   const handleOpenSharePortal = (client: Client, proj?: Project | null) => {
     setShareClient(client);
@@ -150,40 +119,10 @@ const StudioAppContent: React.FC = () => {
     ? projects.find((p) => p.id === drawerProject.id) || null
     : null;
 
-  // If client opened portal directly with secure token link, render dedicated clean branded view strictly isolated
-  if (isStandalonePortal && currentView === 'portal') {
+  if (!isLoaded) {
     return (
-      <div className="min-h-screen bg-[#f7f7f4] text-[#263a32] flex flex-col">
-        {/* Elegant Client Portal Header with NO Backdoor to Internal Studio */}
-        <header className="bg-white/85 backdrop-blur-md border-b border-[#e5e9e3] sticky top-0 z-30 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-[#244d3b] text-white flex items-center justify-center font-serif font-bold text-sm shadow-2xs">
-              S
-            </div>
-            <div>
-              <span className="font-serif text-lg tracking-wide text-[#21362d] block leading-tight">
-                Sage Paper Design
-              </span>
-              <span className="text-[10px] text-[#78867d] tracking-wider uppercase font-medium">
-                Atelier di Partecipazioni & Calligrafia · Firenze
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#edf2eb] text-[#244d3b] text-xs font-semibold border border-[#d5e2d3] shadow-2xs">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Spazio Riservato Protetto</span>
-            </span>
-          </div>
-        </header>
-
-        <main className="flex-1 p-6 lg:p-10 max-w-6xl mx-auto w-full">
-          <ClientPortalView
-            initialClientId={portalClientId}
-            isStandalone={true}
-          />
-        </main>
+      <div className="min-h-screen bg-[#f7f7f4] flex items-center justify-center text-[#68816e]">
+        <Loader2 className="w-6 h-6 animate-spin" />
       </div>
     );
   }
@@ -319,15 +258,13 @@ const StudioAppContent: React.FC = () => {
           )}
 
           {currentView === 'portal' && (
-            <ClientPortalView
-              initialClientId={portalClientId}
-              onNavigateBackToStudio={() => {
-                setIsStandalonePortal(false);
-                setCurrentView('dashboard');
-                window.location.hash = '';
-              }}
-              onSharePortal={handleOpenSharePortal}
-            />
+            <StaffPortalBridge>
+              <ClientPortalView
+                initialClientId={portalClientId}
+                onNavigateBackToStudio={() => setCurrentView('dashboard')}
+                onSharePortal={handleOpenSharePortal}
+              />
+            </StaffPortalBridge>
           )}
 
           {currentView === 'settings' && <SettingsView />}
@@ -456,10 +393,63 @@ const StudioAppContent: React.FC = () => {
   );
 };
 
+/** Token del link condiviso col cliente: "#portal?token=XYZ" (null se non è un link portale). */
+const readPortalLinkToken = (): string | null => {
+  const hash = window.location.hash;
+  if (!hash.startsWith('#portal')) return null;
+  return hash.match(/token=([^&]+)/)?.[1] ?? '';
+};
+
+/** Portale riservato del cliente: nessun accesso al pannello dello studio. */
+const ClientPortalApp: React.FC<{ linkToken: string }> = ({ linkToken }) => (
+  <div className="min-h-screen bg-[#f7f7f4] text-[#263a32] flex flex-col">
+    <header className="bg-white/85 backdrop-blur-md border-b border-[#e5e9e3] sticky top-0 z-30 px-6 py-4 flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-full bg-[#244d3b] text-white flex items-center justify-center font-serif font-bold text-sm shadow-2xs">
+          S
+        </div>
+        <div>
+          <span className="font-serif text-lg tracking-wide text-[#21362d] block leading-tight">Sage Paper Design</span>
+          <span className="text-[10px] text-[#78867d] tracking-wider uppercase font-medium">
+            Atelier di Partecipazioni & Calligrafia · Firenze
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#edf2eb] text-[#244d3b] text-xs font-semibold border border-[#d5e2d3] shadow-2xs">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+          <span>Spazio Riservato Protetto</span>
+        </span>
+      </div>
+    </header>
+
+    <main className="flex-1 p-6 lg:p-10 max-w-6xl mx-auto w-full">
+      <ClientPortalSession linkToken={linkToken}>
+        {(client) => <ClientPortalView initialClientId={client.id} isStandalone={true} />}
+      </ClientPortalSession>
+    </main>
+  </div>
+);
+
 export default function App() {
+  const [portalLinkToken, setPortalLinkToken] = useState<string | null>(readPortalLinkToken);
+
+  useEffect(() => {
+    const onHashChange = () => setPortalLinkToken(readPortalLinkToken());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  if (portalLinkToken !== null) {
+    return <ClientPortalApp key={portalLinkToken} linkToken={portalLinkToken} />;
+  }
+
   return (
-    <StudioProvider>
-      <StudioAppContent />
-    </StudioProvider>
+    <AuthGate>
+      <StudioProvider>
+        <StudioAppContent />
+      </StudioProvider>
+    </AuthGate>
   );
 }

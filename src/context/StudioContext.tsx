@@ -11,31 +11,28 @@ import {
   WeeklyAvailability,
   Proof,
   ProofFeedback,
-  ProjectType,
   PriceCatalogItem,
   FinancialRecord,
   Meeting,
 } from '../types';
-import {
-  buildDefaultTasks,
-  generateId,
-  DEFAULT_PRICE_CATALOG,
-  DEFAULT_FINANCIAL_RECORDS,
-  DEFAULT_MEETINGS,
-  generatePortalPassword,
-} from '../lib/constants';
-import { computeBackwardPlans, TODAY_ISO, addDays, ComputedPlannerResult } from '../lib/plannerEngine';
-import { firestoreDb } from '../lib/firebase';
-import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { buildDefaultTasks, generateId, generatePortalPassword } from '../lib/constants';
+import { computeBackwardPlans, TODAY_ISO, ComputedPlannerResult } from '../lib/plannerEngine';
+import { api, ApiError } from '../lib/api';
 
-const LOCAL_STORAGE_KEY = 'sage_paper_studio_manager_v2';
+/*
+ * Stato dello studio. L'unica fonte di verità è il backend Laravel/MySQL:
+ * - all'avvio i dati arrivano da GET /api/studio/data;
+ * - ogni azione aggiorna subito l'interfaccia e salva sul server;
+ * - se il server rifiuta una modifica, compare un avviso e i dati vengono
+ *   ricaricati dal server, così ciò che si vede è sempre ciò che è salvato.
+ */
 
 const DEFAULT_SETTINGS: StudioSettings = {
   ownerHours: 30, // Giulia weekly capacity
-  collabHours: 4,  // Claudia weekly capacity
-  buffer: 20,      // 20% safety buffer
-  vat: 22,         // 22% VAT
-  deposit: 40,     // 40% deposit
+  collabHours: 4, // Claudia weekly capacity
+  buffer: 20, // 20% safety buffer
+  vat: 22, // 22% VAT
+  deposit: 40, // 40% deposit
   gcalSyncEnabled: false,
   gcalCalendarId: 'primary',
 };
@@ -61,6 +58,23 @@ const DEFAULT_TEAM: TeamMember[] = [
   },
 ];
 
+export interface StudioDataPayload {
+  projects: Project[];
+  clients: Client[];
+  quotes: Quote[];
+  inventory: InventoryItem[];
+  settings: StudioSettings | null;
+  priceCatalog: PriceCatalogItem[];
+  financials: FinancialRecord[];
+  meetings: Meeting[];
+  weeklyAvailability: WeeklyAvailability[];
+}
+
+export interface ImportResult {
+  ok: boolean;
+  message: string;
+}
+
 interface StudioContextType {
   projects: Project[];
   clients: Client[];
@@ -73,7 +87,8 @@ interface StudioContextType {
   settings: StudioSettings;
   teamMembers: TeamMember[];
   plannerResult: ComputedPlannerResult;
-  dbStatus: 'connected' | 'local_fallback' | 'error';
+  dbStatus: 'connected' | 'error';
+  isLoaded: boolean;
   isSyncing: boolean;
   lastSyncedAt: string | null;
 
@@ -129,405 +144,154 @@ interface StudioContextType {
   toastMessage: string | null;
   showToast: (msg: string) => void;
 
-  // Settings & DB Actions
+  // Settings & data
   updateSettings: (updates: Partial<StudioSettings>) => void;
-  connectSupabase: (url: string, key: string) => Promise<{ success: boolean; message: string }>;
   exportBackupJson: () => string;
-  importBackupJson: (jsonStr: string) => boolean;
-  resetStudioData: () => void;
+  importBackupJson: (jsonStr: string) => Promise<ImportResult>;
   refreshFromDatabase: () => Promise<boolean>;
 }
 
 const StudioContext = createContext<StudioContextType | undefined>(undefined);
 
-export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [priceCatalog, setPriceCatalog] = useState<PriceCatalogItem[]>(DEFAULT_PRICE_CATALOG);
-  const [settings, setSettings] = useState<StudioSettings>(DEFAULT_SETTINGS);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>(DEFAULT_TEAM);
-  const [financials, setFinancials] = useState<FinancialRecord[]>(DEFAULT_FINANCIAL_RECORDS);
-  const [meetings, setMeetings] = useState<Meeting[]>(DEFAULT_MEETINGS);
-  const [weeklyAvailability, setWeeklyAvailabilityState] = useState<WeeklyAvailability[]>([]);
+/**
+ * useState + ref sempre aggiornato: le azioni leggono il valore più recente
+ * anche se chiamate più volte di seguito (niente closure obsolete).
+ */
+function useSyncedState<T>(initial: T) {
+  const [state, setState] = useState<T>(initial);
+  const ref = useRef<T>(initial);
+  const update = useCallback((next: T | ((prev: T) => T)) => {
+    const value = typeof next === 'function' ? (next as (prev: T) => T)(ref.current) : next;
+    ref.current = value;
+    setState(value);
+  }, []);
+  return [state, update, ref] as const;
+}
 
-  const [dbStatus, setDbStatus] = useState<'connected' | 'local_fallback' | 'error'>('connected');
-  const [isSyncing, setIsSyncing] = useState<boolean>(true);
+const nowTime = () => new Date().toLocaleTimeString('it-IT');
+
+export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [projects, setProjects, projectsRef] = useSyncedState<Project[]>([]);
+  const [clients, setClients, clientsRef] = useSyncedState<Client[]>([]);
+  const [quotes, setQuotes] = useSyncedState<Quote[]>([]);
+  const [inventory, setInventory, inventoryRef] = useSyncedState<InventoryItem[]>([]);
+  const [priceCatalog, setPriceCatalog] = useSyncedState<PriceCatalogItem[]>([]);
+  const [settings, setSettings] = useSyncedState<StudioSettings>(DEFAULT_SETTINGS);
+  const [financials, setFinancials] = useSyncedState<FinancialRecord[]>([]);
+  const [meetings, setMeetings] = useSyncedState<Meeting[]>([]);
+  const [weeklyAvailability, setWeeklyAvailabilityState] = useSyncedState<WeeklyAvailability[]>([]);
+  const teamMembers = DEFAULT_TEAM;
+
+  const [dbStatus, setDbStatus] = useState<'connected' | 'error'>('connected');
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastTimerRef = useRef<any>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((msg: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToastMessage(msg);
-    toastTimerRef.current = setTimeout(() => {
-      setToastMessage(null);
-    }, 4500);
+    toastTimerRef.current = setTimeout(() => setToastMessage(null), 4500);
   }, []);
 
-  // References to guarantee actions always operate on freshest state without stale closures
-  const projectsRef = useRef<Project[]>([]);
-  const clientsRef = useRef<Client[]>([]);
-  const quotesRef = useRef<Quote[]>([]);
-  const inventoryRef = useRef<InventoryItem[]>([]);
-  const priceCatalogRef = useRef<PriceCatalogItem[]>(DEFAULT_PRICE_CATALOG);
-  const settingsRef = useRef<StudioSettings>(DEFAULT_SETTINGS);
-  const teamMembersRef = useRef<TeamMember[]>(DEFAULT_TEAM);
-  const financialsRef = useRef<FinancialRecord[]>(DEFAULT_FINANCIAL_RECORDS);
-  const meetingsRef = useRef<Meeting[]>(DEFAULT_MEETINGS);
-  const weeklyAvailabilityRef = useRef<WeeklyAvailability[]>([]);
-
-  const deletedProjectIdsRef = useRef<Set<string>>(new Set());
-  const deletedClientIdsRef = useRef<Set<string>>(new Set());
-  const deletedQuoteIdsRef = useRef<Set<string>>(new Set());
-  const deletedMeetingIdsRef = useRef<Set<string>>(new Set());
-
-  // Keep refs in sync with state
-  useEffect(() => { projectsRef.current = projects; }, [projects]);
-  useEffect(() => { clientsRef.current = clients; }, [clients]);
-  useEffect(() => { quotesRef.current = quotes; }, [quotes]);
-  useEffect(() => { inventoryRef.current = inventory; }, [inventory]);
-  useEffect(() => { priceCatalogRef.current = priceCatalog; }, [priceCatalog]);
-  useEffect(() => { settingsRef.current = settings; }, [settings]);
-  useEffect(() => { teamMembersRef.current = teamMembers; }, [teamMembers]);
-  useEffect(() => { financialsRef.current = financials; }, [financials]);
-  useEffect(() => { meetingsRef.current = meetings; }, [meetings]);
-  useEffect(() => { weeklyAvailabilityRef.current = weeklyAvailability; }, [weeklyAvailability]);
-
-  // Instant real-time multi-browser sync dispatcher with deep undefined-stripping
-  const syncToCloud = useCallback(
-    async (overrideData?: {
-      projects?: Project[];
-      clients?: Client[];
-      quotes?: Quote[];
-      inventory?: InventoryItem[];
-      priceCatalog?: PriceCatalogItem[];
-      settings?: StudioSettings;
-      financials?: FinancialRecord[];
-      meetings?: Meeting[];
-    }) => {
-      try {
-        setIsSyncing(true);
-        const currentProjects = overrideData?.projects ?? projectsRef.current;
-        const currentClients = overrideData?.clients ?? clientsRef.current;
-        const currentQuotes = overrideData?.quotes ?? quotesRef.current;
-        const currentInventory = overrideData?.inventory ?? inventoryRef.current;
-        const currentCatalog = overrideData?.priceCatalog ?? priceCatalogRef.current;
-        const currentSettings = overrideData?.settings ?? settingsRef.current;
-        const currentFinancials = overrideData?.financials ?? financialsRef.current;
-        const currentMeetings = overrideData?.meetings ?? meetingsRef.current;
-
-        const rawPayload = {
-          projects: currentProjects,
-          clients: currentClients,
-          quotes: currentQuotes,
-          inventory: currentInventory,
-          priceCatalog: currentCatalog,
-          settings: currentSettings,
-          financials: currentFinancials,
-          meetings: currentMeetings,
-          updatedAt: new Date().toISOString(),
-        };
-
-        // CRITICAL: Strip all undefined fields so Firestore setDoc never throws Unsupported field value: undefined
-        const cleanPayload = JSON.parse(JSON.stringify(rawPayload));
-
-        await setDoc(doc(firestoreDb, 'studio_data', 'main'), cleanPayload, { merge: true });
-        setDbStatus('connected');
-        setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
-        setIsSyncing(false);
-      } catch (err) {
-        console.error('Realtime cloud sync error:', err);
-        setIsSyncing(false);
-      }
+  const applyServerData = useCallback(
+    (data: StudioDataPayload) => {
+      setProjects(data.projects || []);
+      setClients(data.clients || []);
+      setQuotes(data.quotes || []);
+      setInventory(data.inventory || []);
+      setPriceCatalog(data.priceCatalog || []);
+      setFinancials(data.financials || []);
+      setMeetings(data.meetings || []);
+      setWeeklyAvailabilityState(data.weeklyAvailability || []);
+      setSettings({ ...DEFAULT_SETTINGS, ...(data.settings || {}) });
     },
-    []
+    [setProjects, setClients, setQuotes, setInventory, setPriceCatalog, setFinancials, setMeetings, setWeeklyAvailabilityState, setSettings]
   );
 
-  // Synchronous pre-hydration from local cache on mount
-  useEffect(() => {
+  /** Ricarica tutto dallo stato salvato sul server. */
+  const refreshFromDatabase = useCallback(async (): Promise<boolean> => {
+    setPendingRequests((n) => n + 1);
     try {
-      const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed) {
-          if (Array.isArray(parsed.projects) && parsed.projects.length > 0) {
-            setProjects(parsed.projects);
-            projectsRef.current = parsed.projects;
-          }
-          if (Array.isArray(parsed.clients) && parsed.clients.length > 0) {
-            setClients(parsed.clients);
-            clientsRef.current = parsed.clients;
-          }
-          if (Array.isArray(parsed.quotes) && parsed.quotes.length > 0) {
-            setQuotes(parsed.quotes);
-            quotesRef.current = parsed.quotes;
-          }
-          if (Array.isArray(parsed.inventory) && parsed.inventory.length > 0) {
-            setInventory(parsed.inventory);
-            inventoryRef.current = parsed.inventory;
-          }
-          if (Array.isArray(parsed.priceCatalog) && parsed.priceCatalog.length > 0) {
-            setPriceCatalog(parsed.priceCatalog);
-            priceCatalogRef.current = parsed.priceCatalog;
-          }
-          if (Array.isArray(parsed.financials) && parsed.financials.length > 0) {
-            setFinancials(parsed.financials);
-            financialsRef.current = parsed.financials;
-          }
-          if (Array.isArray(parsed.meetings) && parsed.meetings.length > 0) {
-            setMeetings(parsed.meetings);
-            meetingsRef.current = parsed.meetings;
-          }
-          if (Array.isArray(parsed.weeklyAvailability)) {
-            setWeeklyAvailabilityState(parsed.weeklyAvailability);
-            weeklyAvailabilityRef.current = parsed.weeklyAvailability;
-          }
-          if (parsed.settings) {
-            setSettings(parsed.settings);
-            settingsRef.current = parsed.settings;
-          }
-        }
+      const data = await api<StudioDataPayload>('/api/studio/data');
+      applyServerData(data);
+      setDbStatus('connected');
+      setLastSyncedAt(nowTime());
+      return true;
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 401)) {
+        setDbStatus('error');
+        showToast(`⚠ Impossibile caricare i dati: ${err instanceof Error ? err.message : 'errore sconosciuto'}`);
       }
-    } catch (e) {
-      console.warn('Initial local cache parse info:', e);
+      return false;
+    } finally {
+      setIsLoaded(true);
+      setPendingRequests((n) => Math.max(0, n - 1));
     }
-  }, []);
+  }, [applyServerData, showToast]);
 
-  // Load authoritative studio data from Cloud SQL backend on mount
   useEffect(() => {
-    let isMounted = true;
+    refreshFromDatabase();
+  }, [refreshFromDatabase]);
 
-    async function loadStudioData() {
-      setIsSyncing(true);
+  /**
+   * Invia una modifica al server. In caso di errore avvisa e riallinea lo
+   * stato locale ricaricando i dati dal server.
+   */
+  const send = useCallback(
+    async <T = any,>(path: string, method: string, body?: unknown): Promise<T | null> => {
+      setPendingRequests((n) => n + 1);
       try {
-        const res = await fetch('/api/studio/data');
-        if (res.ok) {
-          let data = await res.json();
-
-          // A newly provisioned Neon database is deliberately empty. Preserve
-          // the data already cached in this browser by importing it once,
-          // before treating Neon as the source of truth.
-          if (data && Array.isArray(data.projects) && data.projects.length === 0) {
-            const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-            if (stored) {
-              const cached = JSON.parse(stored);
-              const hasCachedData = [
-                cached.projects,
-                cached.clients,
-                cached.quotes,
-                cached.inventory,
-                cached.priceCatalog,
-                cached.financials,
-              ].some((items) => Array.isArray(items) && items.length > 0);
-
-              if (hasCachedData) {
-                const importResponse = await fetch('/api/studio/sync-push', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(cached),
-                });
-                if (importResponse.ok) {
-                  data = (await importResponse.json()).data;
-                }
-              }
-            }
-          }
-
-          if (data && Array.isArray(data.projects)) {
-            if (!isMounted) return;
-
-            // Cloud SQL is the Single Source of Truth
-            setProjects(data.projects);
-            projectsRef.current = data.projects;
-
-            setClients(data.clients || []);
-            clientsRef.current = data.clients || [];
-
-            setQuotes(data.quotes || []);
-            quotesRef.current = data.quotes || [];
-
-            setInventory(data.inventory || []);
-            inventoryRef.current = data.inventory || [];
-
-            if (Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
-              setPriceCatalog(data.priceCatalog);
-              priceCatalogRef.current = data.priceCatalog;
-            }
-
-            if (Array.isArray(data.financials) && data.financials.length > 0) {
-              setFinancials(data.financials);
-              financialsRef.current = data.financials;
-            }
-
-            if (Array.isArray(data.meetings)) {
-              const filtered = data.meetings.filter((m: any) => !deletedMeetingIdsRef.current.has(m.id));
-              const finalMeetings = filtered.length > 0 ? filtered : (meetingsRef.current.length > 0 ? meetingsRef.current : DEFAULT_MEETINGS);
-              setMeetings(finalMeetings);
-              meetingsRef.current = finalMeetings;
-            }
-
-            if (Array.isArray(data.weeklyAvailability)) {
-              setWeeklyAvailabilityState(data.weeklyAvailability);
-              weeklyAvailabilityRef.current = data.weeklyAvailability;
-            }
-
-            if (data.settings) {
-              setSettings(data.settings);
-              settingsRef.current = data.settings;
-            }
-
-            setDbStatus('connected');
-            setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
-            setIsSyncing(false);
-
-            // Persist the clean, authoritative server state to local cache
-            try {
-              localStorage.setItem(
-                LOCAL_STORAGE_KEY,
-                JSON.stringify({
-                  projects: data.projects,
-                  clients: data.clients || [],
-                  quotes: data.quotes || [],
-                  inventory: data.inventory || [],
-                  priceCatalog: data.priceCatalog || [],
-                  settings: data.settings || DEFAULT_SETTINGS,
-                  teamMembers: DEFAULT_TEAM,
-                  financials: data.financials || [],
-                  meetings: meetingsRef.current,
-                  weeklyAvailability: data.weeklyAvailability || [],
-                  updatedAt: new Date().toISOString(),
-                })
-              );
-            } catch (err) {}
-
-            // Keep Firestore synchronized with the authoritative Cloud SQL state
-            try {
-              const clean = JSON.parse(JSON.stringify({ ...data, updatedAt: new Date().toISOString() }));
-              await setDoc(doc(firestoreDb, 'studio_data', 'main'), clean, { merge: false });
-            } catch (err) {}
-
-            return;
-          }
-        }
+        const result = await api<T>(path, { method, body });
+        setDbStatus('connected');
+        setLastSyncedAt(nowTime());
+        return result;
       } catch (err) {
-        console.warn('Could not load from Cloud SQL, using local cache fallback:', err);
-      }
-
-      // Offline / fallback from local cache
-      try {
-        const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (stored && isMounted) {
-          const parsed = JSON.parse(stored);
-          if (parsed && Array.isArray(parsed.projects)) {
-            setProjects(parsed.projects);
-            projectsRef.current = parsed.projects;
-            setClients(parsed.clients || []);
-            clientsRef.current = parsed.clients || [];
-            setQuotes(parsed.quotes || []);
-            quotesRef.current = parsed.quotes || [];
-            setInventory(parsed.inventory || []);
-            inventoryRef.current = parsed.inventory || [];
-            if (parsed.priceCatalog?.length) {
-              setPriceCatalog(parsed.priceCatalog);
-              priceCatalogRef.current = parsed.priceCatalog;
-            }
-            if (parsed.financials?.length) {
-              setFinancials(parsed.financials);
-              financialsRef.current = parsed.financials;
-            }
-            if (parsed.meetings?.length) {
-              setMeetings(parsed.meetings);
-              meetingsRef.current = parsed.meetings;
-            }
-            if (parsed.weeklyAvailability?.length) {
-              setWeeklyAvailabilityState(parsed.weeklyAvailability);
-              weeklyAvailabilityRef.current = parsed.weeklyAvailability;
-            }
-            if (parsed.settings) {
-              setSettings(parsed.settings);
-              settingsRef.current = parsed.settings;
-            }
-          }
-        }
-      } catch (e) {}
-
-      if (isMounted) setIsSyncing(false);
-    }
-
-    loadStudioData();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Persist state updates to local cache
-  const persistLocalCache = useCallback(
-    (
-      newProjects?: Project[],
-      newClients?: Client[],
-      newQuotes?: Quote[],
-      newInventory?: InventoryItem[],
-      newPriceCatalog?: PriceCatalogItem[],
-      newSettings?: StudioSettings,
-      newTeam?: TeamMember[],
-      newFinancials?: FinancialRecord[],
-      newMeetings?: Meeting[],
-      newWeeklyAvailability?: WeeklyAvailability[]
-    ) => {
-      try {
-        localStorage.setItem(
-          LOCAL_STORAGE_KEY,
-          JSON.stringify({
-            projects: newProjects ?? projectsRef.current,
-            clients: newClients ?? clientsRef.current,
-            quotes: newQuotes ?? quotesRef.current,
-            inventory: newInventory ?? inventoryRef.current,
-            priceCatalog: newPriceCatalog ?? priceCatalogRef.current,
-            settings: newSettings ?? settingsRef.current,
-            teamMembers: newTeam ?? teamMembersRef.current,
-            financials: newFinancials ?? financialsRef.current,
-            meetings: newMeetings ?? meetingsRef.current,
-            weeklyAvailability: newWeeklyAvailability ?? weeklyAvailabilityRef.current,
-            updatedAt: new Date().toISOString(),
-          })
-        );
-      } catch (e) {
-        console.error('LocalStorage write error:', e);
+        if (err instanceof ApiError && err.status === 401) return null; // il login gestisce la sessione
+        setDbStatus(err instanceof ApiError && err.status === 0 ? 'error' : 'connected');
+        showToast(`⚠ Modifica non salvata: ${err instanceof Error ? err.message : 'errore sconosciuto'}`);
+        refreshFromDatabase();
+        return null;
+      } finally {
+        setPendingRequests((n) => Math.max(0, n - 1));
       }
     },
-    []
+    [refreshFromDatabase, showToast]
   );
 
-  // Compute backward plans automatically
-  const plannerResult = useMemo(() => {
-    return computeBackwardPlans(projects, settings);
-  }, [projects, settings]);
+  const plannerResult = useMemo(() => computeBackwardPlans(projects, settings), [projects, settings]);
 
-  // Project Actions
+  /** Applica una trasformazione a un solo progetto. */
+  const patchProject = useCallback(
+    (projectId: string, change: (p: Project) => Project) => {
+      setProjects((prev) => prev.map((p) => (p.id === projectId ? change(p) : p)));
+    },
+    [setProjects]
+  );
+
+  // ---------------------------------------------------------------- Projects
+
   const createProject = useCallback(
     (data: Omit<Project, 'id' | 'createdAt' | 'updatedAt' | 'tasks'> & { tasks?: Task[] }): Project => {
       const newTasks =
-        data.tasks && data.tasks.length > 0
-          ? data.tasks
-          : buildDefaultTasks(data.type, data.owner, data.eventProducts);
+        data.tasks && data.tasks.length > 0 ? data.tasks : buildDefaultTasks(data.type, data.owner, data.eventProducts);
       const newProj: Project = {
         name: data.name.trim(),
         type: data.type,
         eventProducts: data.eventProducts || undefined,
         clientId: data.clientId || '',
         due: data.due,
-        eventDate: data.eventDate || '',
+        eventDate: data.eventDate || undefined,
         owner: data.owner,
         priority: data.priority,
         status: data.status,
         notes: data.notes || '',
+        driveFolderUrl: data.driveFolderUrl || undefined,
         approved: Boolean(data.approved),
-        approvedAt: data.approvedAt || '',
-        approvedBy: data.approvedBy || '',
+        approvedAt: data.approvedAt || undefined,
+        approvedBy: data.approvedBy || undefined,
         id: 'p_' + generateId(),
         tasks: newTasks,
         proofs: [],
@@ -535,179 +299,85 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         updatedAt: TODAY_ISO(),
       };
 
-      const current = projectsRef.current;
-      const updated = [newProj, ...current];
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
-      showToast(`✓ Progetto "${newProj.name}" creato e sincronizzato in Cloud`);
+      setProjects((prev) => [newProj, ...prev]);
+      showToast(`✓ Progetto "${newProj.name}" creato`);
 
-      // Async write to Cloud SQL backend
-      fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: newProj, tasks: newTasks }),
-      })
-        .then((res) => {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
-        })
-        .catch((e) => console.warn('Cloud SQL sync notice:', e));
+      const { tasks: _tasks, proofs: _proofs, ...projectFields } = newProj;
+      send('/api/projects', 'POST', { project: projectFields, tasks: newTasks });
 
       return newProj;
     },
-    [persistLocalCache, syncToCloud, showToast]
+    [setProjects, send, showToast]
   );
 
   const updateProject = useCallback(
     (id: string, updates: Partial<Project>) => {
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== id) return p;
-        return {
-          ...p,
-          ...updates,
-          updatedAt: TODAY_ISO(),
-        };
-      });
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
-      showToast('✓ Progetto aggiornato e sincronizzato');
+      patchProject(id, (p) => ({ ...p, ...updates, updatedAt: TODAY_ISO() }));
+      showToast('✓ Progetto aggiornato');
 
-      const sanitizedUpdates = { ...updates };
-      if (sanitizedUpdates.clientId === '') delete (sanitizedUpdates as any).clientId;
-
-      // Async write to Cloud SQL backend
-      fetch(`/api/projects/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sanitizedUpdates),
-      })
-        .then((res) => {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
-        })
-        .catch((e) => console.warn('Cloud SQL sync notice:', e));
+      // Fasi e bozze hanno endpoint dedicati: qui si inviano solo i campi del progetto.
+      const { tasks: _tasks, proofs: _proofs, id: _id, ...fields } = updates;
+      send(`/api/projects/${id}`, 'PUT', { ...fields, updatedAt: TODAY_ISO() });
     },
-    [persistLocalCache, syncToCloud, showToast]
+    [patchProject, send, showToast]
   );
 
   const deleteProject = useCallback(
-    async (id: string) => {
-      deletedProjectIdsRef.current.add(id);
-      const updated = projectsRef.current.filter((p) => p.id !== id);
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
+    (id: string) => {
+      setProjects((prev) => prev.filter((p) => p.id !== id));
       showToast('Progetto rimosso definitivamente');
-
-      try {
-        const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-        if (res.ok) {
-          setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
-        }
-      } catch (e) {
-        console.warn('Cloud SQL delete notice:', e);
-      }
-
-      try {
-        syncToCloud({ projects: updated });
-      } catch (e) {}
+      send(`/api/projects/${id}`, 'DELETE');
     },
-    [persistLocalCache, syncToCloud, showToast]
+    [setProjects, send, showToast]
   );
 
   const toggleTaskDone = useCallback(
     (projectId: string, taskId: string) => {
-      let targetTaskDone = false;
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== projectId) return p;
-        const newTasks = p.tasks.map((t) => {
-          if (t.id !== taskId) return t;
-          const nextDone = !t.done;
-          targetTaskDone = nextDone;
-          return {
-            ...t,
-            done: nextDone,
-            doneAt: nextDone ? TODAY_ISO() : undefined,
-          };
-        });
-        return { ...p, tasks: newTasks, updatedAt: TODAY_ISO() };
-      });
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
+      const task = projectsRef.current.find((p) => p.id === projectId)?.tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      const done = !task.done;
+      const doneAt = done ? TODAY_ISO() : undefined;
 
-      fetch(`/api/tasks/${taskId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ done: targetTaskDone, doneAt: targetTaskDone ? TODAY_ISO() : null }),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
+      patchProject(projectId, (p) => ({
+        ...p,
+        tasks: p.tasks.map((t) => (t.id === taskId ? { ...t, done, doneAt } : t)),
+        updatedAt: TODAY_ISO(),
+      }));
+      send(`/api/tasks/${taskId}`, 'PUT', { done, doneAt });
     },
-    [persistLocalCache, syncToCloud]
+    [projectsRef, patchProject, send]
   );
 
   const addTask = useCallback(
     (projectId: string, task: Omit<Task, 'id'>) => {
       const newTask: Task = { ...task, id: 't_' + generateId() };
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== projectId) return p;
-        return { ...p, tasks: [...p.tasks, newTask], updatedAt: TODAY_ISO() };
-      });
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
+      const sortOrder = projectsRef.current.find((p) => p.id === projectId)?.tasks.length ?? 0;
 
-      fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newTask, projectId }),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
+      patchProject(projectId, (p) => ({ ...p, tasks: [...p.tasks, newTask], updatedAt: TODAY_ISO() }));
+      send('/api/tasks', 'POST', { ...newTask, projectId, sortOrder });
     },
-    [persistLocalCache, syncToCloud]
+    [projectsRef, patchProject, send]
   );
 
   const updateTask = useCallback(
     (projectId: string, taskId: string, taskUpdates: Partial<Task>) => {
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== projectId) return p;
-        const newTasks = p.tasks.map((t) => (t.id === taskId ? { ...t, ...taskUpdates } : t));
-        return { ...p, tasks: newTasks, updatedAt: TODAY_ISO() };
-      });
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
-
-      fetch(`/api/tasks/${taskId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(taskUpdates),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
+      patchProject(projectId, (p) => ({
+        ...p,
+        tasks: p.tasks.map((t) => (t.id === taskId ? { ...t, ...taskUpdates } : t)),
+        updatedAt: TODAY_ISO(),
+      }));
+      const { id: _id, ...fields } = taskUpdates;
+      send(`/api/tasks/${taskId}`, 'PUT', fields);
     },
-    [persistLocalCache, syncToCloud]
+    [patchProject, send]
   );
 
   const deleteTask = useCallback(
     (projectId: string, taskId: string) => {
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== projectId) return p;
-        return { ...p, tasks: p.tasks.filter((t) => t.id !== taskId), updatedAt: TODAY_ISO() };
-      });
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
-
-      fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.warn(e));
+      patchProject(projectId, (p) => ({ ...p, tasks: p.tasks.filter((t) => t.id !== taskId), updatedAt: TODAY_ISO() }));
+      send(`/api/tasks/${taskId}`, 'DELETE');
     },
-    [persistLocalCache, syncToCloud]
+    [patchProject, send]
   );
 
   const scheduleTask = useCallback(
@@ -718,184 +388,102 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       scheduledOwner?: TeamMemberName,
       scheduledSlot?: 'mattina' | 'pomeriggio'
     ) => {
-      let taskName = '';
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== projectId) return p;
-        const newTasks = p.tasks.map((t) => {
-          if (t.id !== taskId) return t;
-          taskName = t.name;
-          return {
-            ...t,
-            scheduledDate: scheduledDate || undefined,
-            scheduledSlot: scheduledDate ? (scheduledSlot || t.scheduledSlot || 'mattina') : undefined,
-            scheduledOwner: scheduledOwner || t.scheduledOwner || t.owner,
-          };
-        });
-        return { ...p, tasks: newTasks, updatedAt: TODAY_ISO() };
-      });
+      const task = projectsRef.current.find((p) => p.id === projectId)?.tasks.find((t) => t.id === taskId);
+      if (!task) return;
 
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
+      const changes: Partial<Task> = {
+        scheduledDate: scheduledDate || undefined,
+        scheduledSlot: scheduledDate ? scheduledSlot || task.scheduledSlot || 'mattina' : undefined,
+        scheduledOwner: scheduledOwner || task.scheduledOwner || task.owner,
+      };
 
-      fetch(`/api/tasks/${taskId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scheduledDate: scheduledDate || null,
-          scheduledSlot: scheduledDate ? (scheduledSlot || 'mattina') : null,
-          scheduledOwner: scheduledOwner || null,
-        }),
-      })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.warn(e));
+      patchProject(projectId, (p) => ({
+        ...p,
+        tasks: p.tasks.map((t) => (t.id === taskId ? { ...t, ...changes } : t)),
+        updatedAt: TODAY_ISO(),
+      }));
+      send(`/api/tasks/${taskId}`, 'PUT', changes);
 
       if (scheduledDate) {
-        const slotLabel = scheduledSlot === 'pomeriggio' ? 'Pomeriggio' : 'Mattina';
-        showToast(`Attività "${taskName}" allocata: ${scheduledDate} (${slotLabel})${scheduledOwner ? ` a ${scheduledOwner}` : ''}`);
+        const slotLabel = changes.scheduledSlot === 'pomeriggio' ? 'Pomeriggio' : 'Mattina';
+        showToast(`Attività "${task.name}" allocata: ${scheduledDate} (${slotLabel})${scheduledOwner ? ` a ${scheduledOwner}` : ''}`);
       } else {
-        showToast(`Attività "${taskName}" riportata nel backlog non schedulato`);
+        showToast(`Attività "${task.name}" riportata nel backlog non schedulato`);
       }
     },
-    [persistLocalCache, syncToCloud, showToast]
+    [projectsRef, patchProject, send, showToast]
   );
 
   const setWeeklyAvailability = useCallback(
     async (item: WeeklyAvailability) => {
-      const existing = weeklyAvailabilityRef.current;
-      const idx = existing.findIndex((w) => w.id === item.id);
-      let updated: WeeklyAvailability[];
-      if (idx >= 0) {
-        updated = [...existing];
-        updated[idx] = { ...updated[idx], ...item };
-      } else {
-        updated = [...existing, item];
-      }
-      weeklyAvailabilityRef.current = updated;
-      setWeeklyAvailabilityState(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
-
-      try {
-        await fetch('/api/weekly-availability', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(item),
-        });
-        setLastSyncedAt(new Date().toLocaleTimeString('it-IT'));
-        showToast(`Disponibilità per ${item.id} salvata con successo`);
-      } catch (e) {
-        console.warn('Failed to save weekly availability to Cloud SQL:', e);
-      }
+      setWeeklyAvailabilityState((prev) => {
+        const exists = prev.some((w) => w.id === item.id);
+        return exists ? prev.map((w) => (w.id === item.id ? { ...w, ...item } : w)) : [...prev, item];
+      });
+      const saved = await send('/api/weekly-availability', 'POST', item);
+      if (saved) showToast(`Disponibilità per ${item.id} salvata con successo`);
     },
-    [persistLocalCache, showToast]
+    [setWeeklyAvailabilityState, send, showToast]
   );
 
   const approveProject = useCallback(
     (projectId: string, approvedBy?: string) => {
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== projectId) return p;
-        return {
-          ...p,
-          approved: true,
-          approvedAt: TODAY_ISO(),
-          approvedBy: approvedBy || 'Cliente Verificato',
-          updatedAt: TODAY_ISO(),
-        };
-      });
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
-
-      fetch(`/api/projects/${projectId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          approved: true,
-          approvedAt: TODAY_ISO(),
-          approvedBy: approvedBy || 'Cliente Verificato',
-          updatedAt: TODAY_ISO(),
-        }),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
+      const changes = { approved: true, approvedAt: TODAY_ISO(), approvedBy: approvedBy || 'Cliente Verificato' };
+      patchProject(projectId, (p) => ({ ...p, ...changes, updatedAt: TODAY_ISO() }));
+      send(`/api/projects/${projectId}`, 'PUT', { ...changes, updatedAt: TODAY_ISO() });
     },
-    [persistLocalCache, syncToCloud]
+    [patchProject, send]
   );
 
-  // Proofs & Client Portal
+  // ------------------------------------------------------- Proofs & feedback
+
   const addProof = useCallback(
     (projectId: string, proofData: Omit<Proof, 'id' | 'uploadedAt' | 'version' | 'status'>) => {
-      const targetProj = projectsRef.current.find((p) => p.id === projectId);
+      const project = projectsRef.current.find((p) => p.id === projectId);
       const newProof: Proof = {
         ...proofData,
         id: 'prf_' + generateId(),
         projectId,
-        version: (targetProj?.proofs?.length || 0) + 1,
+        version: (project?.proofs?.length || 0) + 1,
         status: 'pending',
         uploadedAt: TODAY_ISO(),
         feedback: [],
       };
+      const movesToReview = project?.status === 'new';
 
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== projectId) return p;
-        const currentProofs = p.proofs || [];
-        return {
-          ...p,
-          proofs: [newProof, ...currentProofs],
-          status: p.status === 'new' ? 'review' : p.status,
-          updatedAt: TODAY_ISO(),
-        };
-      });
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
+      patchProject(projectId, (p) => ({
+        ...p,
+        proofs: [newProof, ...(p.proofs || [])],
+        status: p.status === 'new' ? 'review' : p.status,
+        updatedAt: TODAY_ISO(),
+      }));
 
-      fetch('/api/proofs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProof),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
+      const { feedback: _feedback, ...proofFields } = newProof;
+      send('/api/proofs', 'POST', proofFields);
+      if (movesToReview) send(`/api/projects/${projectId}`, 'PUT', { status: 'review', updatedAt: TODAY_ISO() });
     },
-    [persistLocalCache, syncToCloud]
+    [projectsRef, patchProject, send]
   );
 
   const updateProofStatus = useCallback(
     (projectId: string, proofId: string, status: 'approved' | 'rejected' | 'pending') => {
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== projectId) return p;
-        const proofs = (p.proofs || []).map((prf) => (prf.id === proofId ? { ...prf, status } : prf));
-        const allApproved = status === 'approved';
-        return {
-          ...p,
-          proofs,
-          approved: allApproved ? true : p.approved,
-          approvedAt: allApproved ? TODAY_ISO() : p.approvedAt,
-          updatedAt: TODAY_ISO(),
-        };
-      });
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
+      const approved = status === 'approved';
+      patchProject(projectId, (p) => ({
+        ...p,
+        proofs: (p.proofs || []).map((prf) => (prf.id === proofId ? { ...prf, status } : prf)),
+        approved: approved ? true : p.approved,
+        approvedAt: approved ? TODAY_ISO() : p.approvedAt,
+        updatedAt: TODAY_ISO(),
+      }));
 
-      fetch(`/api/proofs/${proofId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
+      send(`/api/proofs/${proofId}`, 'PUT', { status });
+      if (approved) send(`/api/projects/${projectId}`, 'PUT', { approved: true, approvedAt: TODAY_ISO(), updatedAt: TODAY_ISO() });
     },
-    [persistLocalCache, syncToCloud]
+    [patchProject, send]
   );
 
   const addProofFeedback = useCallback(
-    (
-      projectId: string,
-      proofId: string,
-      authorName: string,
-      authorRole: 'studio' | 'client',
-      message: string
-    ) => {
+    (projectId: string, proofId: string, authorName: string, authorRole: 'studio' | 'client', message: string) => {
       const newFeedback: ProofFeedback = {
         id: 'fb_' + generateId(),
         projectId,
@@ -906,337 +494,186 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         createdAt: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + ' · ' + TODAY_ISO(),
       };
 
-      const updated = projectsRef.current.map((p) => {
-        if (p.id !== projectId) return p;
-        const proofs = (p.proofs || []).map((prf) => {
-          if (prf.id !== proofId) return prf;
-          return {
-            ...prf,
-            feedback: [...(prf.feedback || []), newFeedback],
-          };
-        });
-        return { ...p, proofs, updatedAt: TODAY_ISO() };
-      });
-      projectsRef.current = updated;
-      setProjects(updated);
-      persistLocalCache(updated);
-      syncToCloud({ projects: updated });
-
-      fetch(`/api/proofs/${proofId}/feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newFeedback),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
+      patchProject(projectId, (p) => ({
+        ...p,
+        proofs: (p.proofs || []).map((prf) =>
+          prf.id === proofId ? { ...prf, feedback: [...(prf.feedback || []), newFeedback] } : prf
+        ),
+        updatedAt: TODAY_ISO(),
+      }));
+      send(`/api/proofs/${proofId}/feedback`, 'POST', newFeedback);
     },
-    [persistLocalCache, syncToCloud]
+    [patchProject, send]
   );
 
-  // Client Actions
+  // ----------------------------------------------------------------- Clients
+
   const createClient = useCallback(
     (clientData: Omit<Client, 'id' | 'createdAt' | 'portalToken'>): Client => {
       const newClient: Client = {
         ...clientData,
         id: 'c_' + generateId(),
-        portalToken: 'portal_' + generateId(),
+        portalToken: 'portal_' + generateId() + generateId(),
         portalPassword: clientData.portalPassword || generatePortalPassword(clientData.name),
         portalEnabled: true,
         createdAt: TODAY_ISO(),
       };
-      const updated = [newClient, ...clientsRef.current];
-      clientsRef.current = updated;
-      setClients(updated);
-      persistLocalCache(undefined, updated);
-      syncToCloud({ clients: updated });
-
-      fetch('/api/clients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newClient),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
-
+      setClients((prev) => [newClient, ...prev]);
+      send('/api/clients', 'POST', newClient);
       return newClient;
     },
-    [persistLocalCache, syncToCloud]
+    [setClients, send]
   );
 
   const updateClient = useCallback(
     (id: string, updates: Partial<Client>) => {
-      const updated = clientsRef.current.map((c) => (c.id === id ? { ...c, ...updates } : c));
-      clientsRef.current = updated;
-      setClients(updated);
-      persistLocalCache(undefined, updated);
-      syncToCloud({ clients: updated });
-
-      fetch(`/api/clients/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
+      setClients((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+      const { id: _id, ...fields } = updates;
+      send(`/api/clients/${id}`, 'PUT', fields);
     },
-    [persistLocalCache, syncToCloud]
+    [setClients, send]
   );
 
   const deleteClient = useCallback(
     (id: string) => {
-      deletedClientIdsRef.current.add(id);
-      const updated = clientsRef.current.filter((c) => c.id !== id);
-      clientsRef.current = updated;
-      setClients(updated);
-      persistLocalCache(undefined, updated);
-      syncToCloud({ clients: updated });
-
-      fetch(`/api/clients/${id}`, { method: 'DELETE' })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.warn(e));
+      setClients((prev) => prev.filter((c) => c.id !== id));
+      // Il server scollega il cliente da progetti, preventivi e incontri.
+      setProjects((prev) => prev.map((p) => (p.clientId === id ? { ...p, clientId: '' } : p)));
+      send(`/api/clients/${id}`, 'DELETE');
     },
-    [persistLocalCache, syncToCloud]
+    [setClients, setProjects, send]
   );
 
-  // Quote Actions
+  // ------------------------------------------------------------------ Quotes
+
   const createQuote = useCallback(
     (quoteData: Omit<Quote, 'id' | 'created'>): Quote => {
-      const newQuote: Quote = {
-        ...quoteData,
-        id: 'q_' + generateId(),
-        created: TODAY_ISO(),
-      };
-      const updated = [newQuote, ...quotesRef.current];
-      quotesRef.current = updated;
-      setQuotes(updated);
-      persistLocalCache(undefined, undefined, updated);
-      syncToCloud({ quotes: updated });
-
-      fetch('/api/quotes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quote: newQuote, items: newQuote.items }),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
-
+      const newQuote: Quote = { ...quoteData, id: 'q_' + generateId(), created: TODAY_ISO() };
+      setQuotes((prev) => [newQuote, ...prev]);
+      const { items, ...quoteFields } = newQuote;
+      send('/api/quotes', 'POST', { quote: quoteFields, items });
       return newQuote;
     },
-    [persistLocalCache, syncToCloud]
+    [setQuotes, send]
   );
 
   const updateQuote = useCallback(
     (id: string, updates: Partial<Quote>) => {
-      const updated = quotesRef.current.map((q) => (q.id === id ? { ...q, ...updates } : q));
-      quotesRef.current = updated;
-      setQuotes(updated);
-      persistLocalCache(undefined, undefined, updated);
-      syncToCloud({ quotes: updated });
-
-      fetch(`/api/quotes/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quote: updates, items: updates.items }),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.warn(e));
+      setQuotes((prev) => prev.map((q) => (q.id === id ? { ...q, ...updates } : q)));
+      const { items, id: _id, ...quoteFields } = updates;
+      send(`/api/quotes/${id}`, 'PUT', items ? { quote: quoteFields, items } : { quote: quoteFields });
     },
-    [persistLocalCache, syncToCloud]
+    [setQuotes, send]
   );
 
   const deleteQuote = useCallback(
     (id: string) => {
-      deletedQuoteIdsRef.current.add(id);
-      const updated = quotesRef.current.filter((q) => q.id !== id);
-      quotesRef.current = updated;
-      setQuotes(updated);
-      persistLocalCache(undefined, undefined, updated);
-      syncToCloud({ quotes: updated });
-
-      fetch(`/api/quotes/${id}`, { method: 'DELETE' })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.warn(e));
+      setQuotes((prev) => prev.filter((q) => q.id !== id));
+      send(`/api/quotes/${id}`, 'DELETE');
     },
-    [persistLocalCache, syncToCloud]
+    [setQuotes, send]
   );
 
-  // Inventory Actions
+  // --------------------------------------------------------------- Inventory
+
   const createInventoryItem = useCallback(
     (itemData: Omit<InventoryItem, 'id'>): InventoryItem => {
-      const newItem: InventoryItem = {
-        ...itemData,
-        id: 'm_' + generateId(),
-      };
-      const updated = [newItem, ...inventory];
-      setInventory(updated);
-      persistLocalCache(undefined, undefined, undefined, updated);
-      syncToCloud({ inventory: updated });
-
-      fetch('/api/inventory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newItem),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
-
+      const newItem: InventoryItem = { ...itemData, id: 'm_' + generateId() };
+      setInventory((prev) => [newItem, ...prev]);
+      send('/api/inventory', 'POST', newItem);
       return newItem;
     },
-    [inventory, persistLocalCache, syncToCloud]
+    [setInventory, send]
   );
 
   const updateInventoryItem = useCallback(
     (id: string, updates: Partial<InventoryItem>) => {
-      const updated = inventory.map((i) => (i.id === id ? { ...i, ...updates } : i));
-      setInventory(updated);
-      persistLocalCache(undefined, undefined, undefined, updated);
-      syncToCloud({ inventory: updated });
-
-      fetch(`/api/inventory/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
+      setInventory((prev) => prev.map((i) => (i.id === id ? { ...i, ...updates } : i)));
+      const { id: _id, ...fields } = updates;
+      send(`/api/inventory/${id}`, 'PUT', fields);
     },
-    [inventory, persistLocalCache, syncToCloud]
+    [setInventory, send]
   );
 
   const adjustStock = useCallback(
     (id: string, delta: number) => {
-      let nextVal = 0;
-      const updated = inventory.map((i) => {
-        if (i.id !== id) return i;
-        const newQty = Math.max(0, Number(i.qty) + delta);
-        nextVal = newQty;
-        return { ...i, qty: newQty };
-      });
-      setInventory(updated);
-      persistLocalCache(undefined, undefined, undefined, updated);
-      syncToCloud({ inventory: updated });
-
-      fetch(`/api/inventory/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ qty: String(nextVal) }),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
+      const current = inventoryRef.current.find((i) => i.id === id);
+      if (!current) return;
+      const qty = Math.max(0, Number(current.qty) + delta);
+      setInventory((prev) => prev.map((i) => (i.id === id ? { ...i, qty } : i)));
+      send(`/api/inventory/${id}`, 'PUT', { qty });
     },
-    [inventory, persistLocalCache, syncToCloud]
+    [inventoryRef, setInventory, send]
   );
 
   const deleteInventoryItem = useCallback(
     (id: string) => {
-      const updated = inventory.filter((i) => i.id !== id);
-      setInventory(updated);
-      persistLocalCache(undefined, undefined, undefined, updated);
-      syncToCloud({ inventory: updated });
-
-      fetch(`/api/inventory/${id}`, { method: 'DELETE' })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.error(e));
+      setInventory((prev) => prev.filter((i) => i.id !== id));
+      send(`/api/inventory/${id}`, 'DELETE');
     },
-    [inventory, persistLocalCache, syncToCloud]
+    [setInventory, send]
   );
 
-  // Price Catalog Actions
+  // ----------------------------------------------------------- Price catalog
+
   const createPriceCatalogItem = useCallback(
     (itemData: Omit<PriceCatalogItem, 'id'>): PriceCatalogItem => {
-      const newItem: PriceCatalogItem = {
-        ...itemData,
-        id: 'cat_' + generateId(),
-      };
-      const updated = [...priceCatalog, newItem];
-      setPriceCatalog(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ priceCatalog: updated });
-
-      fetch('/api/price-catalog', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newItem),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
-
+      const newItem: PriceCatalogItem = { ...itemData, id: 'cat_' + generateId() };
+      setPriceCatalog((prev) => [...prev, newItem]);
+      send('/api/price-catalog', 'POST', newItem);
       return newItem;
     },
-    [priceCatalog, persistLocalCache, syncToCloud]
+    [setPriceCatalog, send]
   );
 
   const updatePriceCatalogItem = useCallback(
     (id: string, updates: Partial<PriceCatalogItem>) => {
-      const updated = priceCatalog.map((item) => (item.id === id ? { ...item, ...updates } : item));
-      setPriceCatalog(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ priceCatalog: updated });
-
-      fetch(`/api/price-catalog/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
+      setPriceCatalog((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
+      const { id: _id, ...fields } = updates;
+      send(`/api/price-catalog/${id}`, 'PUT', fields);
     },
-    [priceCatalog, persistLocalCache, syncToCloud]
+    [setPriceCatalog, send]
   );
 
   const deletePriceCatalogItem = useCallback(
     (id: string) => {
-      const updated = priceCatalog.filter((item) => item.id !== id);
-      setPriceCatalog(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ priceCatalog: updated });
-
-      fetch(`/api/price-catalog/${id}`, { method: 'DELETE' })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.error(e));
+      setPriceCatalog((prev) => prev.filter((item) => item.id !== id));
+      send(`/api/price-catalog/${id}`, 'DELETE');
     },
-    [priceCatalog, persistLocalCache, syncToCloud]
+    [setPriceCatalog, send]
   );
 
-  // Financial Actions (Bilancio Studio & Spese/Entrate di Progetto)
+  // -------------------------------------------------------------- Financials
+
   const createFinancialRecord = useCallback(
     (recordData: Omit<FinancialRecord, 'id' | 'createdAt'>): FinancialRecord => {
-      const newRecord: FinancialRecord = {
-        ...recordData,
-        id: 'fin_' + generateId(),
-        createdAt: TODAY_ISO(),
-      };
-      const updated = [newRecord, ...financials];
-      setFinancials(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ financials: updated });
-
-      fetch('/api/finances', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newRecord),
-      })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.error('Cloud SQL finance insert error:', e));
-
+      const newRecord: FinancialRecord = { ...recordData, id: 'fin_' + generateId(), createdAt: TODAY_ISO() };
+      setFinancials((prev) => [newRecord, ...prev]);
+      send('/api/finances', 'POST', newRecord);
       return newRecord;
     },
-    [financials, persistLocalCache, syncToCloud]
+    [setFinancials, send]
   );
 
   const updateFinancialRecord = useCallback(
     (id: string, updates: Partial<FinancialRecord>) => {
-      const updated = financials.map((f) => (f.id === id ? { ...f, ...updates } : f));
-      setFinancials(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ financials: updated });
-
-      fetch(`/api/finances/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.error('Cloud SQL finance update error:', e));
+      setFinancials((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
+      const { id: _id, ...fields } = updates;
+      send(`/api/finances/${id}`, 'PUT', fields);
     },
-    [financials, persistLocalCache, syncToCloud]
+    [setFinancials, send]
   );
 
   const deleteFinancialRecord = useCallback(
     (id: string) => {
-      const updated = financials.filter((f) => f.id !== id);
-      setFinancials(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ financials: updated });
-
-      fetch(`/api/finances/${id}`, { method: 'DELETE' })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.error('Cloud SQL finance delete error:', e));
+      setFinancials((prev) => prev.filter((f) => f.id !== id));
+      send(`/api/finances/${id}`, 'DELETE');
     },
-    [financials, persistLocalCache, syncToCloud]
+    [setFinancials, send]
   );
 
-  // Meetings & Couple Consultations (Meeting Sposi & Google Calendar)
+  // ---------------------------------------------------------------- Meetings
+
   const createMeeting = useCallback(
     (meetingData: Omit<Meeting, 'id' | 'createdAt' | 'updatedAt'>): Meeting => {
       const newMeeting: Meeting = {
@@ -1245,231 +682,102 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         createdAt: TODAY_ISO(),
         updatedAt: TODAY_ISO(),
       };
-      const updated = [newMeeting, ...meetingsRef.current];
-      meetingsRef.current = updated;
-      setMeetings(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ meetings: updated });
+      setMeetings((prev) => [newMeeting, ...prev]);
       showToast(`✓ Incontro con gli sposi "${newMeeting.title}" salvato`);
-
-      fetch('/api/meetings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newMeeting),
-      })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.error('Cloud SQL meeting insert error:', e));
-
+      send('/api/meetings', 'POST', newMeeting);
       return newMeeting;
     },
-    [persistLocalCache, syncToCloud, showToast]
+    [setMeetings, send, showToast]
   );
 
   const updateMeeting = useCallback(
     (id: string, updates: Partial<Meeting>) => {
-      const updated = meetingsRef.current.map((m) =>
-        m.id === id ? { ...m, ...updates, updatedAt: TODAY_ISO() } : m
-      );
-      meetingsRef.current = updated;
-      setMeetings(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ meetings: updated });
-      showToast(`✓ Appunti e note incontro aggiornati`);
-
-      fetch(`/api/meetings/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.error('Cloud SQL meeting update error:', e));
+      setMeetings((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates, updatedAt: TODAY_ISO() } : m)));
+      showToast('✓ Appunti e note incontro aggiornati');
+      const { id: _id, ...fields } = updates;
+      send(`/api/meetings/${id}`, 'PUT', fields);
     },
-    [persistLocalCache, syncToCloud, showToast]
+    [setMeetings, send, showToast]
   );
 
   const deleteMeeting = useCallback(
     (id: string) => {
-      deletedMeetingIdsRef.current.add(id);
-      const updated = meetingsRef.current.filter((m) => m.id !== id);
-      meetingsRef.current = updated;
-      setMeetings(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ meetings: updated });
-      showToast(`Incontro eliminato`);
-
-      fetch(`/api/meetings/${id}`, { method: 'DELETE' })
-        .then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT')))
-        .catch((e) => console.error('Cloud SQL meeting delete error:', e));
+      setMeetings((prev) => prev.filter((m) => m.id !== id));
+      showToast('Incontro eliminato');
+      send(`/api/meetings/${id}`, 'DELETE');
     },
-    [persistLocalCache, syncToCloud, showToast]
+    [setMeetings, send, showToast]
   );
 
-  // Settings
+  // -------------------------------------------------------- Settings & data
+
   const updateSettings = useCallback(
     (updates: Partial<StudioSettings>) => {
-      const updated = { ...settings, ...updates };
-      setSettings(updated);
-      persistLocalCache(undefined, undefined, undefined, undefined, undefined, updated);
-      syncToCloud({ settings: updated });
-
-      fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      }).then(() => setLastSyncedAt(new Date().toLocaleTimeString('it-IT'))).catch((e) => console.error(e));
+      setSettings((prev) => ({ ...prev, ...updates }));
+      send('/api/settings', 'PUT', updates);
     },
-    [settings, persistLocalCache, syncToCloud]
+    [setSettings, send]
   );
-
-  const connectSupabase = useCallback(async (_url: string, _key: string) => {
-    return { success: true, message: 'Cloud SQL PostgreSQL è già connesso e attivo!' };
-  }, []);
 
   const exportBackupJson = useCallback((): string => {
     return JSON.stringify(
       {
-        version: 2,
+        version: 3,
         brand: 'Sage Paper Design',
         exportedAt: new Date().toISOString(),
         settings,
-        teamMembers,
         clients,
         projects,
         quotes,
         inventory,
         priceCatalog,
         financials,
+        meetings,
+        weeklyAvailability,
       },
       null,
       2
     );
-  }, [settings, teamMembers, clients, projects, quotes, inventory, priceCatalog, financials]);
+  }, [settings, clients, projects, quotes, inventory, priceCatalog, financials, meetings, weeklyAvailability]);
 
+  /** Ripristina un backup JSON sul server (POST /api/studio/import, solo owner). */
   const importBackupJson = useCallback(
-    (jsonStr: string): boolean => {
+    async (jsonStr: string): Promise<ImportResult> => {
+      let parsed: any;
       try {
-        const parsed = JSON.parse(jsonStr);
-        if (!parsed || !Array.isArray(parsed.projects) || !Array.isArray(parsed.clients)) {
-          return false;
-        }
-        setProjects(parsed.projects);
-        setClients(parsed.clients || []);
-        setQuotes(parsed.quotes || []);
-        setInventory(parsed.inventory || []);
-        if (parsed.priceCatalog && Array.isArray(parsed.priceCatalog)) setPriceCatalog(parsed.priceCatalog);
-        if (parsed.financials && Array.isArray(parsed.financials)) setFinancials(parsed.financials);
-        if (parsed.settings) setSettings(parsed.settings);
-        if (parsed.teamMembers) setTeamMembers(parsed.teamMembers);
-        persistLocalCache(
-          parsed.projects,
-          parsed.clients || [],
-          parsed.quotes || [],
-          parsed.inventory || [],
-          parsed.priceCatalog || DEFAULT_PRICE_CATALOG,
-          parsed.settings || DEFAULT_SETTINGS,
-          parsed.teamMembers || DEFAULT_TEAM,
-          parsed.financials || DEFAULT_FINANCIAL_RECORDS
+        parsed = JSON.parse(jsonStr);
+      } catch {
+        return { ok: false, message: 'Il file non contiene un JSON valido.' };
+      }
+      if (!parsed || !Array.isArray(parsed.projects) || !Array.isArray(parsed.clients)) {
+        return { ok: false, message: 'Formato del backup non riconosciuto.' };
+      }
+
+      const { version: _v, brand: _b, exportedAt: _e, teamMembers: _t, ...payload } = parsed;
+
+      setPendingRequests((n) => n + 1);
+      try {
+        const res = await api<{ data: StudioDataPayload; counts: Record<string, number>; errors: string[] }>(
+          '/api/studio/import',
+          { method: 'POST', body: payload }
         );
-        return true;
-      } catch (e) {
-        console.error('Invalid backup JSON:', e);
-        return false;
+        applyServerData(res.data);
+        setLastSyncedAt(nowTime());
+        const total = Object.values(res.counts || {}).reduce((sum, n) => sum + n, 0);
+        return res.errors?.length
+          ? { ok: false, message: `Importati ${total} record, ${res.errors.length} con errori: ${res.errors.slice(0, 3).join(' · ')}` }
+          : { ok: true, message: `Backup ripristinato: ${total} record importati.` };
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 403) {
+          return { ok: false, message: 'Solo il titolare dello studio può ripristinare un backup.' };
+        }
+        return { ok: false, message: err instanceof Error ? err.message : 'Import non riuscito.' };
+      } finally {
+        setPendingRequests((n) => Math.max(0, n - 1));
       }
     },
-    [persistLocalCache]
+    [applyServerData]
   );
-
-  const resetStudioData = useCallback(() => {
-    fetch('/api/studio/data')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d && Array.isArray(d.projects)) {
-          setProjects(d.projects);
-          setClients(d.clients || []);
-          setQuotes(d.quotes || []);
-          setInventory(d.inventory || []);
-          if (d.priceCatalog && Array.isArray(d.priceCatalog)) setPriceCatalog(d.priceCatalog);
-          if (d.financials && Array.isArray(d.financials)) setFinancials(d.financials);
-        }
-      })
-      .catch((e) => console.error(e));
-  }, []);
-
-  const refreshFromDatabase = useCallback(async (): Promise<boolean> => {
-    setIsSyncing(true);
-    try {
-      // 1. Fetch directly from Cloud SQL backend (Primary Relational Database)
-      const res = await fetch('/api/studio/data');
-      if (res.ok) {
-        const data = await res.json();
-        if (data && Array.isArray(data.projects)) {
-          setProjects(data.projects);
-          projectsRef.current = data.projects;
-
-          setClients(data.clients || []);
-          clientsRef.current = data.clients || [];
-
-          setQuotes(data.quotes || []);
-          quotesRef.current = data.quotes || [];
-
-          setInventory(data.inventory || []);
-          inventoryRef.current = data.inventory || [];
-
-          if (data.priceCatalog && Array.isArray(data.priceCatalog) && data.priceCatalog.length > 0) {
-            setPriceCatalog(data.priceCatalog);
-            priceCatalogRef.current = data.priceCatalog;
-          }
-
-          if (data.financials && Array.isArray(data.financials) && data.financials.length > 0) {
-            setFinancials(data.financials);
-            financialsRef.current = data.financials;
-          }
-
-          if (data.settings) {
-            setSettings(data.settings);
-            settingsRef.current = data.settings;
-          }
-
-          if (Array.isArray(data.weeklyAvailability)) {
-            setWeeklyAvailabilityState(data.weeklyAvailability);
-            weeklyAvailabilityRef.current = data.weeklyAvailability;
-          }
-
-          setDbStatus('connected');
-          const time = new Date().toLocaleTimeString('it-IT');
-          setLastSyncedAt(time);
-          setIsSyncing(false);
-
-          // Update local cache
-          try {
-            localStorage.setItem(
-              LOCAL_STORAGE_KEY,
-              JSON.stringify({
-                projects: data.projects,
-                clients: data.clients || [],
-                quotes: data.quotes || [],
-                inventory: data.inventory || [],
-                priceCatalog: data.priceCatalog || [],
-                settings: data.settings || DEFAULT_SETTINGS,
-                teamMembers: DEFAULT_TEAM,
-                financials: data.financials || [],
-                meetings: meetingsRef.current,
-                weeklyAvailability: data.weeklyAvailability || [],
-                updatedAt: new Date().toISOString(),
-              })
-            );
-          } catch (err) {}
-
-          return true;
-        }
-      }
-    } catch (e) {
-      console.error('Failed to refresh data from Cloud SQL backend:', e);
-    }
-
-    setIsSyncing(false);
-    return false;
-  }, []);
 
   return (
     <StudioContext.Provider
@@ -1486,7 +794,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         teamMembers,
         plannerResult,
         dbStatus,
-        isSyncing,
+        isLoaded,
+        isSyncing: pendingRequests > 0,
         lastSyncedAt,
         toastMessage,
         showToast,
@@ -1523,10 +832,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         updateMeeting,
         deleteMeeting,
         updateSettings,
-        connectSupabase,
         exportBackupJson,
         importBackupJson,
-        resetStudioData,
         refreshFromDatabase,
       }}
     >

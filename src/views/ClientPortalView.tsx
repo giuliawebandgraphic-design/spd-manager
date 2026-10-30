@@ -35,7 +35,7 @@ import {
 import { Client, Project, Proof } from '../types';
 import { formatDateIt, formatMoney, TODAY_ISO } from '../lib/plannerEngine';
 import { TYPE_NAMES } from '../lib/constants';
-import { useStudio } from '../context/StudioContext';
+import { usePortal } from '../context/PortalContext';
 import { getGmailComposeUrl, STUDIO_GMAIL } from '../lib/gmail';
 import { ClientFiscalDataSection } from '../components/ClientFiscalDataSection';
 import { ProofPreviewViewer } from '../components/ProofPreviewViewer';
@@ -53,17 +53,7 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
   onNavigateBackToStudio,
   onSharePortal,
 }) => {
-  const {
-    clients,
-    projects,
-    quotes,
-    approveProject,
-    updateProofStatus,
-    addProofFeedback,
-    updateProject,
-    updateClient,
-    showToast,
-  } = useStudio();
+  const { clients, projects, quotes, approveProject, sendFeedback, saveDriveLink, showToast, logout } = usePortal();
 
   // Active client being previewed/authenticated
   // When standalone, strictly lock to initialClientId and do NOT fallback to other clients
@@ -84,43 +74,9 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
   const clientProjects = projects.filter((p) => p.clientId === currentClient?.id);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(clientProjects[0]?.id || '');
 
-  // Password gate state for standalone client access
-  const sessionAuthKey = currentClient ? `sage_portal_auth_${currentClient.id}` : '';
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    if (!isStandalone) return true; // Studio staff preview is always authenticated
-    if (!currentClient) return false;
-    return sessionStorage.getItem(`sage_portal_auth_${currentClient.id}`) === 'authenticated';
-  });
-
-  const [enteredPassword, setEnteredPassword] = useState('');
-  const [passwordError, setPasswordError] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-
-  const handlePasswordSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentClient) return;
-
-    const expected = (currentClient.portalPassword || '').trim().toUpperCase();
-    const provided = enteredPassword.trim().toUpperCase();
-
-    // Verify against assigned client password (or fallback default)
-    if ((expected && provided === expected) || (!expected && provided.length >= 3)) {
-      sessionStorage.setItem(sessionAuthKey, 'authenticated');
-      setIsAuthenticated(true);
-      setPasswordError(false);
-    } else {
-      setPasswordError(true);
-    }
-  };
-
-  const handleLogout = () => {
-    if (sessionAuthKey) {
-      sessionStorage.removeItem(sessionAuthKey);
-    }
-    setIsAuthenticated(false);
-    setEnteredPassword('');
-    setPasswordError(false);
-  };
+  // In modalità standalone l'accesso (link + password) è già stato verificato
+  // dal server in ClientPortalSession: qui si gestisce solo l'uscita.
+  const handleLogout = () => logout();
 
   const activeProject =
     clientProjects.find((p) => p.id === selectedProjectId) || clientProjects[0];
@@ -136,12 +92,7 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
   const handleSaveDriveLink = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = driveLinkInput.trim();
-    if (activeProject) {
-      updateProject(activeProject.id, { driveFolderUrl: trimmed || undefined });
-    }
-    if (currentClient) {
-      updateClient(currentClient.id, { driveFolderUrl: trimmed || undefined });
-    }
+    saveDriveLink(activeProject?.id, currentClient?.id, trimmed || undefined);
     showToast('✓ Link cartella Google Drive salvato con successo!');
     setIsEditingDriveLink(false);
   };
@@ -158,18 +109,8 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
     e.preventDefault();
     if (!activeProject || !signerName.trim()) return;
 
-    // Approve both project and current proof
-    approveProject(activeProject.id, signerName.trim());
-    if (currentProof) {
-      updateProofStatus(activeProject.id, currentProof.id, 'approved');
-      addProofFeedback(
-        activeProject.id,
-        currentProof.id,
-        signerName.trim(),
-        'client',
-        `Approvazione formale confermata per la stampa da ${signerName.trim()} il ${new Date().toLocaleString('it-IT')}.`
-      );
-    }
+    // Approva il progetto e la bozza corrente, registrando la nota di approvazione.
+    approveProject(activeProject.id, signerName.trim(), currentProof?.id);
     setSignerName('');
   };
 
@@ -177,16 +118,8 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
     e.preventDefault();
     if (!activeProject || !currentProof || !feedbackText.trim()) return;
 
-    addProofFeedback(
-      activeProject.id,
-      currentProof.id,
-      currentClient?.name || 'Cliente',
-      'client',
-      feedbackText.trim()
-    );
-
-    // If client sends feedback asking for changes, set status to pending or review
-    updateProofStatus(activeProject.id, currentProof.id, 'rejected');
+    // Il feedback del cliente segna la bozza come da rivedere.
+    sendFeedback(activeProject.id, currentProof.id, currentClient?.name || 'Cliente', feedbackText.trim());
     setFeedbackText('');
   };
 
@@ -231,103 +164,6 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
     );
   }
 
-  // Guard 2: Password Gate for standalone client access
-  if (isStandalone && currentClient && !isAuthenticated) {
-    return (
-      <div className="max-w-md mx-auto py-12 px-4 sm:px-6 animate-in fade-in zoom-in-95 duration-150">
-        <div className="bg-white rounded-3xl border border-[#d8e4d6] shadow-xl overflow-hidden p-8 sm:p-10 space-y-6">
-          <div className="text-center space-y-3">
-            <div className="w-14 h-14 rounded-2xl bg-[#edf2eb] text-[#244d3b] flex items-center justify-center mx-auto shadow-2xs">
-              <Lock className="w-7 h-7" />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-widest text-[#68816e] block mb-1">
-                Sage Paper Design · Firenze
-              </span>
-              <h2 className="font-serif text-2xl sm:text-3xl font-normal text-[#21362d]">
-                Scheda Riservata Cliente
-              </h2>
-            </div>
-            <p className="text-xs text-[#5d6e64] leading-relaxed">
-              Benvenuti, <strong className="text-[#21362d]">{currentClient.name}</strong>.<br />
-              Inserite la password di accesso assegnata dal vostro atelier per sbloccare la vostra scheda, esaminare le bozze e verificare i dati fiscali.
-            </p>
-          </div>
-
-          <form onSubmit={handlePasswordSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-[#263a32] mb-1.5 flex items-center justify-between">
-                <span>Password Assegnata *</span>
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="text-[11px] text-[#68816e] hover:text-[#244d3b] flex items-center gap-1 font-normal"
-                >
-                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  <span>{showPassword ? 'Nascondi' : 'Mostra'}</span>
-                </button>
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  autoFocus
-                  value={enteredPassword}
-                  onChange={(e) => {
-                    setEnteredPassword(e.target.value);
-                    setPasswordError(false);
-                  }}
-                  placeholder="Es. SP-ELENA26"
-                  className={`w-full text-sm font-mono p-3 rounded-xl border bg-[#fafbf9] text-[#21362d] focus:outline-hidden ${
-                    passwordError
-                      ? 'border-[#e06d64] bg-[#fff8f7] focus:border-[#d93025]'
-                      : 'border-[#d8e4d6] focus:border-[#244d3b]'
-                  }`}
-                />
-              </div>
-
-              {passwordError && (
-                <div className="mt-2.5 p-2.5 rounded-xl bg-[#fff2f0] border border-[#f5c6cb] text-[#d93025] text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>Password errata. Ricontrolla la password ricevuta dallo studio via WhatsApp o email.</span>
-                </div>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3 px-4 rounded-xl bg-[#244d3b] hover:bg-[#1b3d2e] text-white text-xs font-bold shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Lock className="w-4 h-4" />
-              <span>Sblocca Scheda & Bozze →</span>
-            </button>
-          </form>
-
-          <div className="pt-4 border-t border-[#eef2ec] text-center text-[11px] text-[#78867d] space-y-2">
-            <p className="flex items-center justify-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#244d3b]" />
-              <span>Accesso protetto con link cifrato e password</span>
-            </p>
-            <p>
-              Hai smarrito la password? Contatta Giulia:{' '}
-              <a
-                href={getGmailComposeUrl({
-                  to: STUDIO_GMAIL,
-                  subject: `Richiesta password scheda ${currentClient.name}`,
-                  body: `Gentile Giulia,\n\nrichiedo cortesemente la password per accedere alla scheda cliente "${currentClient.name}".\n\nGrazie,`,
-                })}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[#244d3b] font-semibold underline"
-              >
-                {STUDIO_GMAIL}
-              </a>
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto pb-12">
